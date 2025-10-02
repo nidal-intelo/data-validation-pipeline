@@ -19,6 +19,9 @@ export const processDataChunk = async (
     validRows: number;
     invalidRows: number;
     errors: string[];
+    isJobComplete: boolean;
+    totalValidRows: number; 
+    totalInvalidRows: number;
 }> => {
     const errors: string[] = [];
     let processedRows = 0;
@@ -36,12 +39,16 @@ export const processDataChunk = async (
                 jobId: chunk.jobId,
                 chunkNumber: chunk.chunkNumber
             });
+            // Prepare necessary return values for failed schema conversion
             return {
                 success: false,
                 processedRows: 0,
                 validRows: 0,
                 invalidRows: 0,
-                errors: [`Schema conversion failed: ${schemaError instanceof Error ? schemaError.message : 'Unknown error'}`]
+                errors: [`Schema conversion failed: ${schemaError instanceof Error ? schemaError.message : 'Unknown error'}`],
+                isJobComplete: false,
+                totalValidRows: 0,
+                totalInvalidRows: 0
             };
         }
 
@@ -95,9 +102,14 @@ export const processDataChunk = async (
         // Update progress tracker
         updateProgressTracker(progressTracker, chunk, processedRows, validRows, invalidRows);
 
-        // Send progress update
+        // Capture status and totals from the updated tracker
         const tracker = progressTracker.get(chunk.jobId);
+        let isJobComplete = false;
+        let totalValidRows = 0;
+        let totalInvalidRows = 0;
+
         if (tracker) {
+            // Send progress update message to progress service (or SignalR)
             await sendProgressMessage(progressProducer, chunk.jobId, chunk.orgId, chunk.sourceId, {
                 processedRows: tracker.processedRows,
                 validRows: tracker.validRows,
@@ -105,6 +117,11 @@ export const processDataChunk = async (
                 totalRows: tracker.totalRows,
                 isComplete: tracker.isComplete
             });
+            
+            // Set return values based on the final tracker state
+            isJobComplete = tracker.isComplete;
+            totalValidRows = tracker.validRows;
+            totalInvalidRows = tracker.invalidRows;
         }
 
         logInfo('Data chunk processing completed', {
@@ -112,7 +129,8 @@ export const processDataChunk = async (
             chunkNumber: chunk.chunkNumber,
             processedRows,
             validRows,
-            invalidRows
+            invalidRows,
+            isJobComplete, // Added for clarity
         });
 
         return {
@@ -120,19 +138,26 @@ export const processDataChunk = async (
             processedRows,
             validRows,
             invalidRows,
-            errors
+            errors,
+            isJobComplete,
+            totalValidRows,
+            totalInvalidRows
         };
     } catch (error) {
         logError('Data chunk processing failed', error, {
             jobId: chunk.jobId,
             chunkNumber: chunk.chunkNumber
         });
+        // Prepare necessary return values for generic processing failure
         return {
             success: false,
             processedRows,
             validRows,
             invalidRows,
-            errors: [...errors, error instanceof Error ? error.message : 'Unknown error occurred']
+            errors: [...errors, error instanceof Error ? error.message : 'Unknown error occurred'],
+            isJobComplete: false,
+            totalValidRows: 0,
+            totalInvalidRows: 0
         };
     }
 };
@@ -157,21 +182,31 @@ const updateProgressTracker = (
             invalidRows: existing.invalidRows + invalidRows,
             processedChunks: existing.processedChunks + 1,
             receivedChunks: new Set([...existing.receivedChunks, chunk.chunkNumber]),
-            isComplete: existing.processedChunks + 1 >= existing.expectedChunks
+            // The job is complete if the number of chunks processed equals the total expected chunks
+            // This assumes totalChunks/expectedChunks is correctly set when the file processor sends its first chunk message.
+            isComplete: existing.processedChunks + 1 >= existing.totalChunks // Using totalChunks property which should have been populated
         };
+        
+        // Safety check: if totalRows is known, check if total processing matches totalRows
+        // Note: The totalRows property typically comes from a progress message initiated by the file processor.
+        if (existing.totalRows > 0 && updated.processedRows === existing.totalRows) {
+            updated.isComplete = true;
+        }
+
         progressTracker.set(chunk.jobId, updated);
     } else {
-        // Initialize new tracker
+        // Initialize new tracker. Note: totalRows/totalChunks must be populated by the file processor
+        // or fetched from DB to accurately determine completion (isComplete).
         const newTracker = {
             processedRows,
             validRows,
             invalidRows,
-            totalChunks: 0, // Will be updated when we know the total
+            totalChunks: 0, 
             processedChunks: 1,
-            totalRows: 0, // Will be updated when we know the total
+            totalRows: 0, 
             isComplete: false,
             receivedChunks: new Set([chunk.chunkNumber]),
-            expectedChunks: 0 // Will be updated when we know the total
+            expectedChunks: 0 
         };
         progressTracker.set(chunk.jobId, newTracker);
     }

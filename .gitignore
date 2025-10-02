@@ -131,3 +131,8 @@ coverage/
 
 # Local development
 *.local
+
+# Test files and data
+test-blob-upload.sh
+inventory.csv
+schema-converter/

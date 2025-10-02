@@ -1,0 +1,44 @@
+{
+  "name": "file-processor",
+  "version": "1.0.0",
+  "description": "Azure Function for processing files and streaming data to Kafka",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "func start",
+    "dev": "tsc && func start",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "@azure/storage-blob": "^12.17.0",
+    "@azure/event-hubs": "^5.11.0",
+    "pg": "^8.11.3",
+    "zod": "^3.22.4",
+    "protobufjs": "^7.2.5",
+    "csv-parser": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.9",
+    "typescript": "^5.3.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.8",
+    "eslint": "^8.55.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "azure-functions",
+    "file-processing",
+    "kafka",
+    "data-streaming",
+    "protobuf"
+  ],
+  "author": "CFK POC Team"
+}

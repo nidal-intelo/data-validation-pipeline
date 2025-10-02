@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package cfk_poc.pipeline;
+
+message DataRow {
+    int32 rowNumber = 1;  
+    map<string, string> fields = 2;
+    string rawData = 3;
+}
+
+message DataChunk {
+    string jobId = 1;
+    string orgId = 2;
+    string sourceId = 3;
+    int32 chunkNumber = 4;
+    repeated DataRow rows = 5;
+}
+
+message ProgressUpdate {
+    string jobId = 1;
+    string serviceName = 2;
+    int32 processedCount = 3;
+    int32 totalRows = 4;
+}
+
+message ValidationError {
+    string fieldName = 1;  
+    string errorCode = 2;  
+    string errorMessage = 3;  
+    string expectedFormat = 4;
+    string actualValue = 5;
+    string validationRule = 6;
+}
+
+message ValidRowMessage {
+    string jobId = 1;
+    string orgId = 2;
+    string sourceId = 3;
+    DataRow validRow = 4;
+}
+
+message InvalidRowMessage {
+    string jobId = 1;
+    string orgId = 2;
+    string sourceId = 3;
+    DataRow originalRow = 4;
+    repeated ValidationError errors = 5;
+}

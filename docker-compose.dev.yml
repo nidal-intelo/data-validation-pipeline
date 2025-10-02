@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  validation-service:
+    build:
+      context: ./src/services/validation-service
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+      - KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+      - KAFKA_TOPIC_INJECTION=injection-topic
+      - KAFKA_TOPIC_VALID_ROWS=valid-row-topic
+      - KAFKA_TOPIC_INVALID_ROWS=invalid-row-topic
+      - KAFKA_TOPIC_PROGRESS=progress-topic
+      - POSTGRES_HOST=localhost
+      - POSTGRES_DATABASE=cfk_poc
+      - POSTGRES_CLIENT_ID=postgres
+      - DATABRICKS_OAUTH_TOKEN=dev-token
+    volumes:
+      - ./src/services/validation-service:/app
+      - /app/node_modules
+    command: npm run dev
+    restart: unless-stopped
+
+  progress-service:
+    build:
+      context: ./src/services/progress-service
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+      - KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+      - KAFKA_TOPIC_PROGRESS=progress-topic
+      - POSTGRES_HOST=localhost
+      - POSTGRES_DATABASE=cfk_poc
+      - POSTGRES_CLIENT_ID=postgres
+      - DATABRICKS_OAUTH_TOKEN=dev-token
+      - SIGNALR_CONNECTION_STRING=dev-connection-string
+    volumes:
+      - ./src/services/progress-service:/app
+      - /app/node_modules
+    command: npm run dev
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+{
+  "name": "protobuf-definitions",
+  "version": "1.0.0",
+  "description": "Protobuf definitions for CFK POC pipeline",
+  "scripts": {
+    "generate": "pbjs -t static-module -w commonjs -o generated.js pipeline.proto && pbts -o generated.d.ts generated.js",
+    "clean": "rm -f generated.js generated.d.ts"
+  },
+  "devDependencies": {
+    "protobufjs": "^7.2.5"
+  }
+}

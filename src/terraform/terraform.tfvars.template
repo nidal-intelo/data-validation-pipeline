@@ -1,0 +1,25 @@
+# Azure Authentication
+azurerm_client_id          = "your-client-id-here"
+azurerm_client_secret      = "your-client-secret-here"
+azurerm_tenant_id          = "your-tenant-id-here"
+azurerm_subscription_id    = "your-subscription-id-here"
+
+# Resource Configuration
+resource_group_name = "your-resource-group-name"
+location = "westus2"
+cluster_name = "kafka-poc"
+
+# Azure Functions
+create_azure_functions = true
+
+# Database Configuration
+database_admin_username = "your-database-username"
+database_admin_password = "your-database-password"
+storage_replication_type = "LRS"
+
+# Existing Resources
+existing_database_host = "your-database-host"
+existing_database_name = "your-database-name"
+existing_databricks_host = "your-databricks-host"
+existing_databricks_sql_path = "your-databricks-sql-path"
+databricks_access_token = "your-databricks-token"

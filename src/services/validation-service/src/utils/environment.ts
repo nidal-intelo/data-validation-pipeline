@@ -20,6 +20,8 @@ export const getEnvironmentConfig = (): {
     validationDbBatchSize: number;
     validationMaxAccumulatedRows: number;
     nodeEnv: string;
+    azureStorageConnectionString: string;
+    azureStorageContainerName: string;
 } => {
     const requiredEnvVars = [
         'KAFKA_BOOTSTRAP_SERVERS',
@@ -30,7 +32,9 @@ export const getEnvironmentConfig = (): {
         'POSTGRES_HOST',
         'POSTGRES_DATABASE',
         'POSTGRES_CLIENT_ID',
-        'DATABRICKS_OAUTH_TOKEN'
+        'DATABRICKS_OAUTH_TOKEN',
+        'AZURE_STORAGE_CONNECTION_STRING',
+        'AZURE_STORAGE_CONTAINER_NAME'
     ];
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -50,7 +54,9 @@ export const getEnvironmentConfig = (): {
         postgresClientSecret: process.env.DATABRICKS_OAUTH_TOKEN!,
         validationDbBatchSize: parseInt(process.env.VALIDATION_DB_BATCH_SIZE || '10', 10),
         validationMaxAccumulatedRows: parseInt(process.env.VALIDATION_MAX_ACCUMULATED_ROWS || '1000', 10),
-        nodeEnv: process.env.NODE_ENV || 'development'
+        nodeEnv: process.env.NODE_ENV || 'development',
+        azureStorageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING!,
+        azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME!
     };
 };
 

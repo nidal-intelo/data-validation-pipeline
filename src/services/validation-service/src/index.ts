@@ -1,5 +1,9 @@
 import express from 'express';
-import { EventHubConsumerClient } from '@azure/event-hubs';
+// --- NEW IMPORTS FOR CHECKPOINTING ---
+import { EventHubConsumerClient, PartitionContext, EventData, ReceivedEventData } from '@azure/event-hubs';
+import { BlobCheckpointStore } from '@azure/eventhubs-checkpointstore-blob';
+import { BlobServiceClient } from '@azure/storage-blob';
+// -------------------------------------
 import { getEnvironmentConfig } from './utils/environment';
 import { createDatabasePool, closeDatabasePool, createDatabaseConfig } from './utils/database';
 import { closeEventHubProducer } from './utils/eventHubs';
@@ -38,9 +42,27 @@ const initializeValidationService = async (): Promise<void> => {
         invalidRowsProducer = require('./utils/eventHubs').createInvalidRowsProducer();
         progressProducer = require('./utils/eventHubs').createProgressProducer();
         
+        // --- NEW CHECKPOINT STORE INITIALIZATION ---
+        const blobServiceClient = BlobServiceClient.fromConnectionString(env.azureStorageConnectionString);
+        const checkpointStore = new BlobCheckpointStore(
+            blobServiceClient.getContainerClient(env.azureStorageContainerName)
+        );
+        logInfo('Blob Checkpoint Store initialized successfully', {
+            containerName: env.azureStorageContainerName
+        });
+        // ------------------------------------------
+
         // Initialize EventHub consumer
         const consumerGroup = 'validation-service-group';
-        consumer = new EventHubConsumerClient(consumerGroup, env.kafkaBootstrapServers, env.kafkaTopicInjection);
+        
+        // FIX: The constructor requires the Event Hub Name (kafkaTopicInjection) to be the third argument 
+        // when using a connection string (kafkaBootstrapServers) and a Checkpoint Store.
+        consumer = new EventHubConsumerClient(
+            consumerGroup,
+            env.kafkaBootstrapServers,
+            env.kafkaTopicInjection, // Event Hub Name (Topic Name)
+            checkpointStore // The Checkpoint Store is the fourth argument for this specific overload
+        );
         
         logInfo('Validation service initialized successfully', {
             kafkaBootstrapServers: env.kafkaBootstrapServers,
@@ -64,13 +86,35 @@ const startEventHubConsumer = async (): Promise<void> => {
         logInfo('Starting EventHub consumer...');
         
         await consumer.subscribe({
-            processEvents: async (events) => {
+            // The processEvents handler now includes the PartitionContext for checkpointing
+            processEvents: async (events: EventData[], context: PartitionContext) => {
+                // Process each event in the batch
                 for (const event of events) {
+                    // Check if event.body is null or undefined before proceeding
+                    if (!event.body) {
+                        logInfo('Skipping event with empty body', { partitionId: context.partitionId });
+                        continue;
+                    }
+                    // The handleDataValidation function throws an error on failure, 
+                    // preventing checkpointing for this batch if processing fails.
                     await handleDataValidation(event, databasePool, validRowsProducer, invalidRowsProducer, progressProducer, progressTracker);
                 }
+                
+                // CRITICAL: Update the checkpoint *only* after successfully processing all events in the batch.
+                if (events.length > 0) {
+                    // Get the sequence number of the last event in the batch
+                    const lastEvent = events[events.length - 1] as ReceivedEventData;
+                    await context.updateCheckpoint(lastEvent);
+                    logInfo('Checkpoint updated successfully', {
+                        partitionId: context.partitionId,
+                        sequenceNumber: lastEvent.sequenceNumber
+                    });
+                }
             },
-            processError: async (error) => {
-                logError('EventHub consumer error', error);
+            processError: async (error, context) => {
+                logError('EventHub consumer error during processing or checkpointing', error, {
+                    partitionId: context?.partitionId
+                });
             }
         });
         
@@ -87,8 +131,13 @@ const startEventHubConsumer = async (): Promise<void> => {
  */
 const stopEventHubConsumer = async (): Promise<void> => {
     try {
-        await consumer.close();
-        logInfo('EventHub consumer stopped successfully');
+        // Consumer needs to be checked for existence before closing
+        if (consumer) {
+            await consumer.close();
+            logInfo('EventHub consumer stopped successfully');
+        } else {
+            logInfo('EventHub consumer was not initialized.');
+        }
     } catch (error) {
         logError('Failed to stop EventHub consumer', error);
     }
@@ -170,14 +219,12 @@ process.on('unhandledRejection', (reason, promise) => {
 const main = async (): Promise<void> => {
     try {
         console.log('Starting Validation Service Container App...');
+        // Note: Environment variables are now validated in getEnvironmentConfig, but logging them here is still useful
         console.log('Environment variables:', {
             KAFKA_BOOTSTRAP_SERVERS: process.env.KAFKA_BOOTSTRAP_SERVERS,
             KAFKA_TOPIC_INJECTION: process.env.KAFKA_TOPIC_INJECTION,
-            KAFKA_TOPIC_VALID_ROWS: process.env.KAFKA_TOPIC_VALID_ROWS,
-            KAFKA_TOPIC_INVALID_ROWS: process.env.KAFKA_TOPIC_INVALID_ROWS,
-            KAFKA_TOPIC_PROGRESS: process.env.KAFKA_TOPIC_PROGRESS,
-            VALIDATION_DB_BATCH_SIZE: process.env.VALIDATION_DB_BATCH_SIZE || '10',
-            VALIDATION_MAX_ACCUMULATED_ROWS: process.env.VALIDATION_MAX_ACCUMULATED_ROWS || '1000',
+            AZURE_STORAGE_CONNECTION_STRING: process.env.AZURE_STORAGE_CONNECTION_STRING ? '***SET***' : '***NOT SET***',
+            AZURE_STORAGE_CONTAINER_NAME: process.env.AZURE_STORAGE_CONTAINER_NAME,
             POSTGRES_HOST: process.env.POSTGRES_HOST,
             NODE_ENV: process.env.NODE_ENV
         });

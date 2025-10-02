@@ -21,6 +21,8 @@ export const createDatabaseConfig = (): any => {
     };
 };
 
+const schemaCache = new Map<string, any>();
+
 /**
  * Create database connection pool
  * Pure function that creates a new pool
@@ -38,6 +40,20 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
     data?: any;
     error?: string;
 }> => {
+
+    const cacheKey = `${orgId}:${sourceId}`;
+    if (schemaCache.has(cacheKey)) {
+        const cachedSchema = schemaCache.get(cacheKey);
+        logInfo('Retrieved schema definition from cache', {
+            schemaId: cachedSchema.id,
+            orgId,
+            sourceId
+        });
+        return {
+            success: true,
+            data: cachedSchema
+        };
+    }
     const client = await pool.connect();
     try {
         const query = `
@@ -67,6 +83,8 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
             createdDate: row.createddate,
             updatedDate: row.updateddate
         };
+
+        schemaCache.set(cacheKey, schemaDefinition);
 
         logInfo('Retrieved schema definition', {
             schemaId: schemaDefinition.id,

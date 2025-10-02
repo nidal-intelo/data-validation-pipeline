@@ -64,3 +64,5 @@ Thumbs.db
 
 # Testing
 .nyc_output/
+
+package-lock.json

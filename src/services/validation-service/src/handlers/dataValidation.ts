@@ -1,7 +1,8 @@
-import { getSchemaDefinition } from '../utils/database';
+import { getSchemaDefinition, updateValidationStatus } from '../utils/database';
 import { processDataChunk } from '../services/validationService';
 import { logInfo, logError } from '../utils/logger';
 import * as generated from '../utils/generated.js';
+import { clearProgressTracker } from '../services/validationService';
 
 /**
  * Handle data validation event
@@ -51,7 +52,15 @@ export const handleDataValidation = async (
                 rowCount: chunk.rows.length
             });
         }
-
+        
+        // Check if this is the first chunk for this job (assuming jobId is sessionId)
+        const currentTracker = progressTracker.get(chunk.jobId);
+        if (!currentTracker) {
+            logInfo('Starting validation process, updating status to processing', { jobId: chunk.jobId });
+            // Set initial counts to 0 and validation status to PROCESSING
+            await updateValidationStatus(databasePool, chunk.jobId, 0, 0, 'processing');
+        }
+        
         // Get schema definition
         const schemaResult = await getSchemaDefinition(databasePool, chunk.orgId, chunk.sourceId);
         if (!schemaResult.success || !schemaResult.data) {
@@ -83,6 +92,21 @@ export const handleDataValidation = async (
                 validRows: result.validRows,
                 invalidRows: result.invalidRows
             });
+
+            // Check for job completion and update final status in DB
+            if (result.isJobComplete) {
+                logInfo('Validation job completed, updating final status and row counts', { jobId: chunk.jobId });
+                await updateValidationStatus(
+                    databasePool, 
+                    chunk.jobId, 
+                    result.totalValidRows, 
+                    result.totalInvalidRows, 
+                    'completed'
+                );
+                
+                // --- CRITICAL CLEANUP: Remove the job from the in-memory tracker
+                clearProgressTracker(progressTracker, chunk.jobId);
+            }
         }
     } catch (error) {
         logError('Data validation handler failed', error);

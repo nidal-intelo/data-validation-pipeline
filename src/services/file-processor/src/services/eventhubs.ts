@@ -18,7 +18,8 @@ export const createEventHubProducer = () => {
  */
 export const sendChunksToEventHub = async (producer: EventHubProducerClient, chunks: any[]) => {
     const errors: string[] = [];
-    let sentCount = 0;
+    let sentBatchCount = 0;
+    let sentChunkCount = 0;
     let failedCount = 0;
 
     try {
@@ -26,8 +27,7 @@ export const sendChunksToEventHub = async (producer: EventHubProducerClient, chu
             totalChunks: chunks.length
         });
 
-        // Create batch for sending
-        const batch = await producer.createBatch();
+        let batch = await producer.createBatch();
 
         for (const chunk of chunks) {
             try {
@@ -38,55 +38,86 @@ export const sendChunksToEventHub = async (producer: EventHubProducerClient, chu
                 }
 
                 const eventData = {
-                    body: serializationResult.data
+                    body: serializationResult.data,
+                    partitionKey: chunk.jobId
                 };
 
-                // Try to add to batch
-                if (!batch.tryAdd(eventData)) {
-                    // Batch is full, send it and create a new one
-                    await producer.sendBatch(batch);
-                    sentCount++;
-
-                    const newBatch = await producer.createBatch();
-                    if (!newBatch.tryAdd(eventData)) {
-                        throw new Error('Event data too large for batch');
+                // Try to add to current batch
+                let added = batch.tryAdd(eventData);
+                
+                // If batch is full, send it and create a new one
+                while (!added) {
+                    // Send the full batch
+                    if (batch.count > 0) {
+                        await producer.sendBatch(batch);
+                        sentBatchCount++;
+                        logInfo('Sent batch', { 
+                            batchNumber: sentBatchCount, 
+                            eventsInBatch: batch.count,
+                            jobId: chunk.jobId
+                        });
+                    }
+                    
+                    // Create new batch and retry adding
+                    batch = await producer.createBatch();
+                    added = batch.tryAdd(eventData);
+                    
+                    // If still can't add, the single event is too large
+                    if (!added && batch.count === 0) {
+                        throw new Error(`Event data too large for batch (chunk ${chunk.chunkNumber}, size: ${serializationResult.data.length} bytes)`);
                     }
                 }
+                
+                sentChunkCount++;
+                
             } catch (error) {
                 failedCount++;
                 const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                errors.push(`Failed to add chunk ${chunk.chunkNumber} to batch: ${errorMessage}`);
-                logError('Failed to add chunk to batch', error, {
+                errors.push(`Failed to process chunk ${chunk.chunkNumber}: ${errorMessage}`);
+                logError('Failed to process chunk', error, {
                     chunkNumber: chunk.chunkNumber,
                     jobId: chunk.jobId
                 });
             }
         }
 
-        // Send remaining batch
+        // Send final batch with remaining events
         if (batch.count > 0) {
             await producer.sendBatch(batch);
-            sentCount++;
+            sentBatchCount++;
+            logInfo('Sent final batch', { 
+                batchNumber: sentBatchCount, 
+                eventsInBatch: batch.count 
+            });
         }
 
         logInfo('EventHub integration completed', {
-            sentCount,
-            failedCount,
-            totalChunks: chunks.length
+            totalChunks: chunks.length,
+            sentChunkCount,
+            sentBatchCount,
+            failedCount
         });
+
+        // CRITICAL: Verify all chunks were sent
+        if (sentChunkCount !== chunks.length - failedCount) {
+            const missingCount = chunks.length - sentChunkCount - failedCount;
+            errors.push(`CRITICAL: ${missingCount} chunks were neither sent nor failed - potential data loss!`);
+        }
 
         return {
             success: errors.length === 0,
-            sentCount,
+            sentBatchCount,
+            sentChunkCount,
             failedCount,
             errors
         };
     } catch (error) {
-        logError('EventHub sending failed', error);
+        logError('EventHub sending failed catastrophically', error);
         return {
             success: false,
-            sentCount,
-            failedCount: failedCount + chunks.length,
+            sentBatchCount,
+            sentChunkCount,
+            failedCount: chunks.length - sentChunkCount,
             errors: [...errors, error instanceof Error ? error.message : 'Unknown error']
         };
     }

@@ -125,6 +125,69 @@ export const createUploadSession = async (
     }
 };
 
+
+export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: string): Promise<{
+    success: boolean;
+    data?: any;
+    error?: string;
+}> => {
+
+    const client = await pool.connect();
+    try {
+        const query = `
+      SELECT id, orgid, label, schema, createddate, updateddate
+      FROM schemadef 
+      WHERE orgid = $1 AND id = $2
+      ORDER BY updateddate DESC
+      LIMIT 1
+    `;
+        const result = await client.query(query, [orgId, sourceId]);
+        console.log('result : ', result);
+        
+        if (result.rows.length === 0) {
+            return {
+                success: false,
+                error: `No schema definition found for orgId: ${orgId}, sourceId: ${sourceId}`
+            };
+        }
+
+        const row = result.rows[0];
+        console.log('row : ', row);
+        const schemaDefinition = {
+            id: row.id,
+            orgId: row.orgid,
+            label: row.label,
+            schema: row.schema,
+            createdDate: row.createddate,
+            updatedDate: row.updateddate
+        };
+
+
+        logInfo('Retrieved schema definition', {
+            schemaId: schemaDefinition.id,
+            orgId,
+            sourceId,
+            fieldCount: schemaDefinition.schema?.fields?.length || 0
+        });
+
+        return {
+            success: true,
+            data: schemaDefinition
+        };
+    } catch (error) {
+        logError('Failed to get schema definition', error, {
+            orgId,
+            sourceId
+        });
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    } finally {
+        client.release();
+    }
+};
+
 /**
  * Get existing upload session
  * Pure function that retrieves an upload session

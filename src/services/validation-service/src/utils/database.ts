@@ -41,19 +41,6 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
     error?: string;
 }> => {
 
-    const cacheKey = `${orgId}:${sourceId}`;
-    if (schemaCache.has(cacheKey)) {
-        const cachedSchema = schemaCache.get(cacheKey);
-        logInfo('Retrieved schema definition from cache', {
-            schemaId: cachedSchema.id,
-            orgId,
-            sourceId
-        });
-        return {
-            success: true,
-            data: cachedSchema
-        };
-    }
     const client = await pool.connect();
     try {
         const query = `
@@ -83,8 +70,6 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
             createdDate: row.createddate,
             updatedDate: row.updateddate
         };
-
-        schemaCache.set(cacheKey, schemaDefinition);
 
         logInfo('Retrieved schema definition', {
             schemaId: schemaDefinition.id,
@@ -151,6 +136,90 @@ export const updateValidationStatus = async (
         return {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error occurred'
+        };
+    } finally {
+        client.release();
+    }
+};
+
+
+/**
+ * Atomically increment validation counts and check for completion
+ * Returns true if this was the completing chunk
+ */
+export const incrementValidationCounts = async (
+    pool: Pool,
+    sessionId: string,
+    validRowsIncrement: number,
+    invalidRowsIncrement: number,
+    processedRowsIncrement: number,
+    totalExpectedRows: number
+): Promise<{ success: boolean; isComplete: boolean; validRows: number; invalidRows: number; error?: string }> => {
+    const client = await pool.connect();
+    try {
+        // Atomic increment and check in single transaction
+        const query = `
+            UPDATE uploadsession 
+            SET 
+                validrows = COALESCE(validrows, 0) + $1,
+                invalidrows = COALESCE(invalidrows, 0) + $2,
+                updatedat = NOW()
+            WHERE id = $3
+            RETURNING validrows, invalidrows, validrows + invalidrows as totalprocessed
+        `;
+        
+        const result = await client.query(query, [
+            validRowsIncrement,
+            invalidRowsIncrement,
+            sessionId
+        ]);
+
+        if (result.rows.length === 0) {
+            return {
+                success: false,
+                isComplete: false,
+                validRows: 0,
+                invalidRows: 0,
+                error: `Session ${sessionId} not found`
+            };
+        }
+
+        const row = result.rows[0];
+        const isComplete = row.totalprocessed >= totalExpectedRows;
+
+        // If complete, update status in separate query (idempotent)
+        if (isComplete) {
+            await client.query(
+                `UPDATE uploadsession 
+                 SET validationstatus = 'completed', updatedat = NOW() 
+                 WHERE id = $1 AND validationstatus != 'completed'`,
+                [sessionId]
+            );
+        }
+
+        logInfo('Incremented validation counts', {
+            sessionId,
+            validRows: row.validrows,
+            invalidRows: row.invalidrows,
+            totalProcessed: row.totalprocessed,
+            totalExpected: totalExpectedRows,
+            isComplete
+        });
+
+        return {
+            success: true,
+            isComplete,
+            validRows: row.validrows,
+            invalidRows: row.invalidrows
+        };
+    } catch (error) {
+        logError('Failed to increment validation counts', error, { sessionId });
+        return {
+            success: false,
+            isComplete: false,
+            validRows: 0,
+            invalidRows: 0,
+            error: error instanceof Error ? error.message : 'Unknown error'
         };
     } finally {
         client.release();

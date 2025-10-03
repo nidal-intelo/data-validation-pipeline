@@ -134,6 +134,8 @@ coverage/
 
 # Test files and data
 test-blob-upload.sh
+test-blob-upload-two.sh
 inventory.csv
+sales.csv
 warehouse_inventory.csv
 schema-converter/

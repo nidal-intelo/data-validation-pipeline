@@ -4,6 +4,7 @@ import { parseCSVFromBuffer, validateCSVStructure } from '../utils/dataParser';
 import { createDataChunks, validateChunks, getChunkingStats, createChunkingSummary } from './chunkingService';
 import { createEventHubProducer, sendChunksToEventHub, closeEventHubProducer } from './eventhubs';
 import { logInfo, logError } from '../utils/logger';
+import { sendJobMetadata } from './metadataService';
 
 /**
  * Process file upload - main orchestration function
@@ -55,17 +56,20 @@ export const processFileUpload = async (pathComponents: any, timestamp: number, 
             throw new Error(`Chunking failed: ${chunkingResult.error}`);
         }
 
-        // Validate chunks
-        const chunkValidation = validateChunks(chunkingResult.chunks);
-        if (!chunkValidation.isValid) {
-            throw new Error(`Chunk validation failed: ${chunkValidation.errors.join(', ')}`);
-        }
+        // Send job metadata
+        const metadataResult = await sendJobMetadata(eventHubProducer, pool, {
+            jobId: sessionId,
+            orgId: pathComponents.orgId,
+            sourceId: pathComponents.sourceId,
+            totalChunks: chunkingResult.totalChunks,
+            totalRows: parsedData.totalrows,
+            filename: pathComponents.filename,
+            timestamp
+        });
 
-        // Log chunking statistics
-        const stats = getChunkingStats(chunkingResult.chunks);
-        const summary = createChunkingSummary(chunkingResult.chunks);
-        logInfo('Chunking statistics', stats);
-        logInfo('Chunking summary', { summary: summary.summary });
+        if (!metadataResult.success) {
+            throw new Error(`Failed to send metadata: ${metadataResult.error}`);
+        }
 
         // Send chunks to EventHub
         const eventHubResult = await sendChunksToEventHub(eventHubProducer, chunkingResult.chunks);
@@ -76,7 +80,7 @@ export const processFileUpload = async (pathComponents: any, timestamp: number, 
         logInfo('File processing completed successfully', {
             totalrows: parsedData.totalrows,
             totalChunks: chunkingResult.totalChunks,
-            sentCount: eventHubResult.sentCount,
+            sentCount: eventHubResult.sentChunkCount,
             failedCount: eventHubResult.failedCount
         });
 

@@ -52,7 +52,7 @@ export const downloadBlob = async (blobServiceClient: BlobServiceClient, pathCom
         return {
             success: true,
             data: buffer
-        };
+        };  
     } catch (error) {
         logError('Failed to download blob', error, {
             filename: pathComponents.filename,

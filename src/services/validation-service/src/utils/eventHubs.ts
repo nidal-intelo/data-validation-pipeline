@@ -116,7 +116,16 @@ export const sendProgressMessage = async (
     jobId: string,
     orgId: string,
     sourceId: string,
-    progress: any
+    serviceName: string,  // NEW: Required parameter for service identification
+    progress: {
+        processedRows: number;
+        validRows?: number;
+        invalidRows?: number;
+        totalRows: number;
+        processedChunks?: number;
+        totalChunks?: number;
+        isComplete: boolean;
+    }
 ): Promise<{ success: boolean; error?: string }> => {
     try {
         const eventData = {
@@ -124,19 +133,27 @@ export const sendProgressMessage = async (
                 jobId,
                 orgId,
                 sourceId,
-                ...progress,
+                serviceName,           // CRITICAL: Identifies which service is reporting
+                processedCount: progress.processedRows,  // Match protobuf ProgressUpdate schema
+                totalRows: progress.totalRows,
+                validRows: progress.validRows,           // Additional metadata
+                invalidRows: progress.invalidRows,       // Additional metadata
+                processedChunks: progress.processedChunks,
+                totalChunks: progress.totalChunks,
+                isComplete: progress.isComplete,
                 timestamp: new Date().toISOString()
             }
         };
+        
         await producer.sendBatch([eventData]);
         
         logInfo('Sent progress message', {
             jobId,
             orgId,
             sourceId,
+            serviceName,
             processedRows: progress.processedRows,
-            validRows: progress.validRows,
-            invalidRows: progress.invalidRows,
+            totalRows: progress.totalRows,
             isComplete: progress.isComplete
         });
         
@@ -145,7 +162,8 @@ export const sendProgressMessage = async (
         logError('Failed to send progress message', error, {
             jobId,
             orgId,
-            sourceId
+            sourceId,
+            serviceName
         });
         return {
             success: false,
@@ -153,6 +171,7 @@ export const sendProgressMessage = async (
         };
     }
 };
+
 
 /**
  * Close EventHub producer

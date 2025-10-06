@@ -1240,7 +1240,8 @@ $root.cfk_poc = (function() {
              * @property {string|null} [jobId] ValidRowMessage jobId
              * @property {string|null} [orgId] ValidRowMessage orgId
              * @property {string|null} [sourceId] ValidRowMessage sourceId
-             * @property {cfk_poc.pipeline.IDataRow|null} [validRow] ValidRowMessage validRow
+             * @property {cfk_poc.pipeline.IDataRow|null} [data] ValidRowMessage data
+             * @property {string|null} [dataId] ValidRowMessage dataId
              */
 
             /**
@@ -1283,12 +1284,20 @@ $root.cfk_poc = (function() {
             ValidRowMessage.prototype.sourceId = "";
 
             /**
-             * ValidRowMessage validRow.
-             * @member {cfk_poc.pipeline.IDataRow|null|undefined} validRow
+             * ValidRowMessage data.
+             * @member {cfk_poc.pipeline.IDataRow|null|undefined} data
              * @memberof cfk_poc.pipeline.ValidRowMessage
              * @instance
              */
-            ValidRowMessage.prototype.validRow = null;
+            ValidRowMessage.prototype.data = null;
+
+            /**
+             * ValidRowMessage dataId.
+             * @member {string} dataId
+             * @memberof cfk_poc.pipeline.ValidRowMessage
+             * @instance
+             */
+            ValidRowMessage.prototype.dataId = "";
 
             /**
              * Creates a new ValidRowMessage instance using the specified properties.
@@ -1320,8 +1329,10 @@ $root.cfk_poc = (function() {
                     writer.uint32(/* id 2, wireType 2 =*/18).string(message.orgId);
                 if (message.sourceId != null && Object.hasOwnProperty.call(message, "sourceId"))
                     writer.uint32(/* id 3, wireType 2 =*/26).string(message.sourceId);
-                if (message.validRow != null && Object.hasOwnProperty.call(message, "validRow"))
-                    $root.cfk_poc.pipeline.DataRow.encode(message.validRow, writer.uint32(/* id 4, wireType 2 =*/34).fork()).ldelim();
+                if (message.data != null && Object.hasOwnProperty.call(message, "data"))
+                    $root.cfk_poc.pipeline.DataRow.encode(message.data, writer.uint32(/* id 4, wireType 2 =*/34).fork()).ldelim();
+                if (message.dataId != null && Object.hasOwnProperty.call(message, "dataId"))
+                    writer.uint32(/* id 5, wireType 2 =*/42).string(message.dataId);
                 return writer;
             };
 
@@ -1371,7 +1382,11 @@ $root.cfk_poc = (function() {
                             break;
                         }
                     case 4: {
-                            message.validRow = $root.cfk_poc.pipeline.DataRow.decode(reader, reader.uint32());
+                            message.data = $root.cfk_poc.pipeline.DataRow.decode(reader, reader.uint32());
+                            break;
+                        }
+                    case 5: {
+                            message.dataId = reader.string();
                             break;
                         }
                     default:
@@ -1418,11 +1433,14 @@ $root.cfk_poc = (function() {
                 if (message.sourceId != null && message.hasOwnProperty("sourceId"))
                     if (!$util.isString(message.sourceId))
                         return "sourceId: string expected";
-                if (message.validRow != null && message.hasOwnProperty("validRow")) {
-                    var error = $root.cfk_poc.pipeline.DataRow.verify(message.validRow);
+                if (message.data != null && message.hasOwnProperty("data")) {
+                    var error = $root.cfk_poc.pipeline.DataRow.verify(message.data);
                     if (error)
-                        return "validRow." + error;
+                        return "data." + error;
                 }
+                if (message.dataId != null && message.hasOwnProperty("dataId"))
+                    if (!$util.isString(message.dataId))
+                        return "dataId: string expected";
                 return null;
             };
 
@@ -1444,11 +1462,13 @@ $root.cfk_poc = (function() {
                     message.orgId = String(object.orgId);
                 if (object.sourceId != null)
                     message.sourceId = String(object.sourceId);
-                if (object.validRow != null) {
-                    if (typeof object.validRow !== "object")
-                        throw TypeError(".cfk_poc.pipeline.ValidRowMessage.validRow: object expected");
-                    message.validRow = $root.cfk_poc.pipeline.DataRow.fromObject(object.validRow);
+                if (object.data != null) {
+                    if (typeof object.data !== "object")
+                        throw TypeError(".cfk_poc.pipeline.ValidRowMessage.data: object expected");
+                    message.data = $root.cfk_poc.pipeline.DataRow.fromObject(object.data);
                 }
+                if (object.dataId != null)
+                    message.dataId = String(object.dataId);
                 return message;
             };
 
@@ -1469,7 +1489,8 @@ $root.cfk_poc = (function() {
                     object.jobId = "";
                     object.orgId = "";
                     object.sourceId = "";
-                    object.validRow = null;
+                    object.data = null;
+                    object.dataId = "";
                 }
                 if (message.jobId != null && message.hasOwnProperty("jobId"))
                     object.jobId = message.jobId;
@@ -1477,8 +1498,10 @@ $root.cfk_poc = (function() {
                     object.orgId = message.orgId;
                 if (message.sourceId != null && message.hasOwnProperty("sourceId"))
                     object.sourceId = message.sourceId;
-                if (message.validRow != null && message.hasOwnProperty("validRow"))
-                    object.validRow = $root.cfk_poc.pipeline.DataRow.toObject(message.validRow, options);
+                if (message.data != null && message.hasOwnProperty("data"))
+                    object.data = $root.cfk_poc.pipeline.DataRow.toObject(message.data, options);
+                if (message.dataId != null && message.hasOwnProperty("dataId"))
+                    object.dataId = message.dataId;
                 return object;
             };
 

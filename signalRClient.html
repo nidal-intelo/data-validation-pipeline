@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignalR Progress Test Client</title>
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@7.0.0/dist/browser/signalr.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .connection-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 12px 24px;
+            margin-right: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .progress-section {
+            margin-bottom: 30px;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #333;
+        }
+        .progress-bar-container {
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .progress-bar-fill.validation {
+            background: linear-gradient(90deg, #28a745, #5cb85c);
+        }
+        .progress-bar-fill.transformation {
+            background: linear-gradient(90deg, #007bff, #0056b3);
+        }
+        .progress-details {
+            font-size: 14px;
+            color: #666;
+        }
+        .log-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid #007bff;
+            padding-left: 10px;
+        }
+        .log-entry.info {
+            border-left-color: #007bff;
+        }
+        .log-entry.success {
+            border-left-color: #28a745;
+            color: #7dff7d;
+        }
+        .log-entry.error {
+            border-left-color: #dc3545;
+            color: #ff7d7d;
+        }
+        .log-timestamp {
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔄 SignalR Progress Test Client</h1>
+        
+        <!-- Connection Panel -->
+        <div class="connection-panel">
+            <h3>Connection Settings</h3>
+            <div class="input-group">
+                <label for="apiUrl">Progress Service API URL:</label>
+                <input id="apiUrl" value="https://poc-kafka-poc-progress.blueriver-9c89afb5.westus2.azurecontainerapps.io" />
+            </div>
+            <div class="input-group">
+                <label for="orgId">Organization ID:</label>
+                <input type="text" id="orgId" value="5d4050e9-a33d-40e2-9ac9-e900fcc49c1d" placeholder="Your org ID">
+            </div>
+            <div class="input-group">
+                <label for="userId">User ID (optional):</label>
+                <input type="text" id="userId" value="test-user-123" placeholder="test-user-123">
+            </div>
+            <button class="btn-primary" onclick="connect()">Connect to SignalR</button>
+            <button class="btn-danger" onclick="disconnect()">Disconnect</button>
+        </div>
+        
+        <!-- Status -->
+        <div id="status" class="status disconnected">
+            Status: Disconnected
+        </div>
+        
+        <!-- Progress Bars -->
+        <div class="progress-section">
+            <h3>Progress Tracking</h3>
+            
+            <!-- Validation Progress -->
+            <div style="margin-bottom: 20px;">
+                <div class="progress-header">
+                    <span>Validation</span>
+                    <span id="validationPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div id="validationBar" class="progress-bar-fill validation" style="width: 0%;">
+                        0%
+                    </div>
+                </div>
+                <div class="progress-details" id="validationDetails">
+                    Waiting for updates...
+                </div>
+            </div>
+            
+            <!-- Transformation Progress -->
+            <div>
+                <div class="progress-header">
+                    <span>Transformation</span>
+                    <span id="transformationPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div id="transformationBar" class="progress-bar-fill transformation" style="width: 0%;">
+                        0%
+                    </div>
+                </div>
+                <div class="progress-details" id="transformationDetails">
+                    Waiting for updates...
+                </div>
+            </div>
+        </div>
+        
+        <!-- Test Actions -->
+        <div class="connection-panel">
+            <h3>Test Actions</h3>
+            <button class="btn-success" onclick="sendTestProgress('validation')">Send Test Validation Update</button>
+            <button class="btn-success" onclick="sendTestProgress('transformation')">Send Test Transformation Update</button>
+            <button class="btn-primary" onclick="clearLogs()">Clear Logs</button>
+        </div>
+        
+        <!-- Log Console -->
+        <h3>Connection Log</h3>
+        <div id="logContainer" class="log-container">
+            <div class="log-entry info">
+                <span class="log-timestamp">[System]</span> Ready to connect...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let connection = null;
+        let currentOrgId = null;
+        
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span> ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        function updateStatus(text, state) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Status: ${text}`;
+            statusEl.className = `status ${state}`;
+        }
+        
+        function updateProgress(serviceName, data) {
+            const percentage = data.percentage || Math.floor((data.processedCount / data.totalRows) * 100);
+            
+            if (serviceName === 'validation') {
+                document.getElementById('validationBar').style.width = percentage + '%';
+                document.getElementById('validationBar').textContent = percentage + '%';
+                document.getElementById('validationPercent').textContent = percentage + '%';
+                document.getElementById('validationDetails').textContent = 
+                    `${data.processedCount.toLocaleString()} / ${data.totalRows.toLocaleString()} rows` +
+                    (data.validRows ? ` (${data.validRows} valid, ${data.invalidRows} invalid)` : '') +
+                    (data.isComplete ? ' ✓ Complete' : '');
+            } else if (serviceName === 'transformation') {
+                document.getElementById('transformationBar').style.width = percentage + '%';
+                document.getElementById('transformationBar').textContent = percentage + '%';
+                document.getElementById('transformationPercent').textContent = percentage + '%';
+                document.getElementById('transformationDetails').textContent = 
+                    `${data.processedCount.toLocaleString()} / ${data.totalRows.toLocaleString()} rows` +
+                    (data.isComplete ? ' ✓ Complete' : '');
+            }
+        }
+        
+        async function connect() {
+            try {
+                const apiUrl = document.getElementById('apiUrl').value;
+                const orgId = document.getElementById('orgId').value;
+                const userId = document.getElementById('userId').value;
+                
+                if (!orgId) {
+                    alert('Please enter an Organization ID');
+                    return;
+                }
+                
+                currentOrgId = orgId;
+                updateStatus('Connecting...', 'connecting');
+                addLog('Requesting connection token...', 'info');
+                
+                // Step 1: Get connection info from Progress Service
+                const tokenUrl = `${apiUrl}/api/signalr/negotiate?orgId=${orgId}&userId=${userId}`;
+                const response = await fetch(tokenUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to get token: ${response.status}`);
+                }
+                
+                const connectionInfo = await response.json();
+                addLog(`Token received. URL: ${connectionInfo.url}`, 'success');
+                addLog(`Connecting to SignalR...`, 'info');
+                
+                // Step 2: Create SignalR connection
+                connection = new signalR.HubConnectionBuilder()
+                    .withUrl(connectionInfo.url, {
+                        accessTokenFactory: () => connectionInfo.accessToken
+                    })
+                    .withAutomaticReconnect()
+                    .configureLogging(signalR.LogLevel.Information)
+                    .build();
+                
+                // Step 3: Set up message handler
+                connection.on('ReceiveProgressUpdate', (update) => {
+                    addLog(`Progress Update: ${update.serviceName} - ${update.processedCount}/${update.totalRows}`, 'success');
+                    console.log('Received update:', update);
+                    
+                    // Only show updates for our orgId
+                    if (update.orgId === currentOrgId) {
+                        updateProgress(update.serviceName, update);
+                    } else {
+                        addLog(`Ignored update for different org: ${update.orgId}`, 'info');
+                    }
+                });
+                
+                // Step 4: Connection event handlers
+                connection.onreconnecting((error) => {
+                    updateStatus('Reconnecting...', 'connecting');
+                    addLog('Connection lost, reconnecting...', 'error');
+                });
+                
+                connection.onreconnected((connectionId) => {
+                    updateStatus('Connected', 'connected');
+                    addLog(`Reconnected! Connection ID: ${connectionId}`, 'success');
+                });
+                
+                connection.onclose((error) => {
+                    updateStatus('Disconnected', 'disconnected');
+                    addLog('Connection closed' + (error ? `: ${error}` : ''), 'error');
+                });
+                
+                // Step 5: Start connection
+                await connection.start();
+                updateStatus('Connected', 'connected');
+                addLog(`✓ Connected successfully! Connection ID: ${connection.connectionId}`, 'success');
+                addLog(`Subscribed to org group: org_${orgId}`, 'info');
+                
+            } catch (error) {
+                updateStatus('Connection Failed', 'disconnected');
+                addLog(`✗ Connection failed: ${error.message}`, 'error');
+                console.error('Connection error:', error);
+            }
+        }
+        
+        async function disconnect() {
+            if (connection) {
+                await connection.stop();
+                connection = null;
+                updateStatus('Disconnected', 'disconnected');
+                addLog('Disconnected from SignalR', 'info');
+            }
+        }
+        
+        async function sendTestProgress(serviceName) {
+            if (!connection || connection.state !== 'Connected') {
+                alert('Please connect to SignalR first');
+                return;
+            }
+            
+            const apiUrl = document.getElementById('apiUrl').value;
+            const orgId = document.getElementById('orgId').value;
+            
+            // Generate random progress data
+            const totalRows = 10000;
+            const processedCount = Math.floor(Math.random() * totalRows);
+            
+            const testData = {
+                jobId: 'test-job-' + Date.now(),
+                orgId: orgId,
+                serviceName: serviceName,
+                processedCount: processedCount,
+                totalRows: totalRows,
+                validRows: serviceName === 'validation' ? Math.floor(processedCount * 0.95) : undefined,
+                invalidRows: serviceName === 'validation' ? Math.floor(processedCount * 0.05) : undefined,
+                isComplete: false
+            };
+            
+            addLog(`Sending test ${serviceName} progress...`, 'info');
+            
+            try {
+                const response = await fetch(`${apiUrl}/test/send-progress`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(testData)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    addLog(`✓ Test message sent successfully to group: ${result.targetGroup}`, 'success');
+                } else {
+                    addLog(`✗ Failed to send test message: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                addLog(`✗ Error sending test message: ${error.message}`, 'error');
+            }
+        }
+        
+        function clearLogs() {
+            const logContainer = document.getElementById('logContainer');
+            logContainer.innerHTML = '<div class="log-entry info"><span class="log-timestamp">[System]</span> Logs cleared</div>';
+        }
+    </script>
+</body>
+</html>

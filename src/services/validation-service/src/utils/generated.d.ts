@@ -490,8 +490,11 @@ export namespace cfk_poc {
             /** ValidRowMessage sourceId */
             sourceId?: (string|null);
 
-            /** ValidRowMessage validRow */
-            validRow?: (cfk_poc.pipeline.IDataRow|null);
+            /** ValidRowMessage data */
+            data?: (cfk_poc.pipeline.IDataRow|null);
+
+            /** ValidRowMessage dataId */
+            dataId?: (string|null);
         }
 
         /** Represents a ValidRowMessage. */
@@ -512,8 +515,11 @@ export namespace cfk_poc {
             /** ValidRowMessage sourceId. */
             public sourceId: string;
 
-            /** ValidRowMessage validRow. */
-            public validRow?: (cfk_poc.pipeline.IDataRow|null);
+            /** ValidRowMessage data. */
+            public data?: (cfk_poc.pipeline.IDataRow|null);
+
+            /** ValidRowMessage dataId. */
+            public dataId: string;
 
             /**
              * Creates a new ValidRowMessage instance using the specified properties.

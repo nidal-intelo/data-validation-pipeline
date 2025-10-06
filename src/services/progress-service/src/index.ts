@@ -1,8 +1,9 @@
 import express from 'express';
 import { EventHubConsumerClient } from '@azure/event-hubs';
+import * as crypto from 'crypto';
 import { getEnvironmentConfig } from './utils/environment';
 import { createDatabasePool, closeDatabasePool, createDatabaseConfig } from './utils/database';
-import { createSignalRConnection, connectToSignalR, disconnectFromSignalR } from './utils/signalRService';
+import { createSignalRRestClient, SignalRRestClient } from './utils/signalRRestClient';
 import { handleProgressUpdate } from './handlers/progressHandler';
 import { logInfo, logError } from './utils/logger';
 
@@ -11,41 +12,157 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
+app.use(express.static('public')); // Serve static test page
+
+// Enable CORS for testing
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 // Global state for progress tracking
 const progressStates = new Map();
 
 // Initialize services
 let consumer: EventHubConsumerClient;
-let signalRConnection: any;
+let signalRClient: SignalRRestClient;
 let databasePool: any;
 
 /**
+ * Generate JWT token for SignalR client connection
+ * This is the token generation logic embedded in the service
+ */
+function generateSignalRToken(
+    endpoint: string,
+    accessKey: string,
+    hubName: string,
+    userId?: string,
+    orgId?: string,
+    expiresInMinutes: number = 60
+): string {
+    const audience = `${endpoint}/client/?hub=${hubName}`;
+    const expiresAt = Math.floor(Date.now() / 1000) + (expiresInMinutes * 60);
+    
+    const header = {
+        alg: 'HS256',
+        typ: 'JWT'
+    };
+    
+    const payload: any = {
+        aud: audience,
+        exp: expiresAt,
+        iat: Math.floor(Date.now() / 1000)
+    };
+    
+    // Add user ID for user-specific messages
+    if (userId) {
+        payload.sub = userId;
+    }
+    
+    // IMPORTANT: Add orgId as a claim for filtering
+    if (orgId) {
+        payload.orgId = orgId;
+    }
+    
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    
+    const signature = crypto
+        .createHmac('sha256', accessKey)
+        .update(`${encodedHeader}.${encodedPayload}`)
+        .digest('base64url');
+    
+    return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+/**
+ * Parse SignalR connection string
+ */
+function parseConnectionString(connectionString: string): { endpoint: string; accessKey: string } {
+    const parts = connectionString.split(';');
+    let endpoint = '';
+    let accessKey = '';
+    
+    for (const part of parts) {
+        if (part.startsWith('Endpoint=')) {
+            endpoint = part.substring(9);
+        } else if (part.startsWith('AccessKey=')) {
+            accessKey = part.substring(10);
+        }
+    }
+    
+    return { endpoint, accessKey };
+}
+
+/**
+ * TOKEN GENERATION ENDPOINT
+ * This replaces the need for a separate Azure Function
+ * 
+ * GET /api/signalr/negotiate?userId=<user>&orgId=<org>
+ */
+app.get('/api/signalr/negotiate', (req, res) => {
+    try {
+        const env = getEnvironmentConfig();
+        const { endpoint, accessKey } = parseConnectionString(env.signalRConnectionString);
+        
+        // CRITICAL: Get orgId from query params for org-specific filtering
+        const userId = req.query.userId as string || undefined;
+        const orgId = req.query.orgId as string;
+        const hubName = req.query.hubName as string || 'progressHub';
+        
+        if (!orgId) {
+            return res.status(400).json({
+                error: 'orgId is required for connection'
+            });
+        }
+        
+        // Generate token with orgId claim
+        const accessToken = generateSignalRToken(endpoint, accessKey, hubName, userId, orgId, 60);
+        
+        // Build connection URL
+        const url = `${endpoint}/client/?hub=${hubName}`;
+        
+        logInfo('Generated SignalR connection info', {
+            userId,
+            orgId,
+            hubName
+        });
+        
+        res.status(200).json({
+            url: url,
+            accessToken: accessToken,
+            orgId: orgId // Return orgId for client reference
+        });
+    } catch (error) {
+        logError('Failed to generate SignalR token', error);
+        res.status(500).json({
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+/**
  * Initialize progress service
- * Pure function that initializes all services
  */
 const initializeProgressService = async (): Promise<void> => {
     try {
         const env = getEnvironmentConfig();
         
-        // Initialize database pool
         databasePool = createDatabasePool(createDatabaseConfig());
+        signalRClient = createSignalRRestClient(env.signalRConnectionString, 'progressHub');
         
-        // Initialize SignalR connection
-        signalRConnection = createSignalRConnection();
-        const signalRResult = await connectToSignalR(signalRConnection);
-        if (!signalRResult.success) {
-            throw new Error(`Failed to connect to SignalR: ${signalRResult.error}`);
-        }
-        
-        // Initialize EventHub consumer
         const consumerGroup = 'progress-service-group';
         consumer = new EventHubConsumerClient(consumerGroup, env.kafkaBootstrapServers, env.kafkaTopicProgress);
         
         logInfo('Progress service initialized successfully', {
             kafkaBootstrapServers: env.kafkaBootstrapServers,
             kafkaTopicProgress: env.kafkaTopicProgress,
-            signalRConnectionString: env.signalRConnectionString
+            signalRMode: 'serverless-rest-api'
         });
     } catch (error) {
         logError('Failed to initialize progress service', error);
@@ -55,7 +172,6 @@ const initializeProgressService = async (): Promise<void> => {
 
 /**
  * Start EventHub consumer
- * Pure function that starts the consumer
  */
 const startEventHubConsumer = async (): Promise<void> => {
     try {
@@ -64,7 +180,7 @@ const startEventHubConsumer = async (): Promise<void> => {
         await consumer.subscribe({
             processEvents: async (events) => {
                 for (const event of events) {
-                    await handleProgressUpdate(event, progressStates, signalRConnection);
+                    await handleProgressUpdate(event, progressStates, signalRClient);
                 }
             },
             processError: async (error) => {
@@ -81,7 +197,6 @@ const startEventHubConsumer = async (): Promise<void> => {
 
 /**
  * Stop EventHub consumer
- * Pure function that stops the consumer
  */
 const stopEventHubConsumer = async (): Promise<void> => {
     try {
@@ -92,60 +207,46 @@ const stopEventHubConsumer = async (): Promise<void> => {
     }
 };
 
-/**
- * Get service status
- * Pure function that returns service status
- */
-const getServiceStatus = () => {
-    return {
-        isRunning: true,
-        consumerGroupId: 'progress-service-group',
-        progressStates: progressStates.size
-    };
-};
-
 // Health check endpoint
 app.get('/health', (req, res) => {
-    const status = getServiceStatus();
     res.status(200).json({
         status: 'healthy',
         service: 'progress-service',
         timestamp: new Date().toISOString(),
-        kafka: {
-            isRunning: status.isRunning,
-            consumerGroupId: status.consumerGroupId
+        signalR: {
+            mode: 'serverless-rest-api',
+            tokenEndpoint: '/api/signalr/negotiate'
         }
     });
 });
 
 // Status endpoint
 app.get('/status', (req, res) => {
-    const status = getServiceStatus();
     res.status(200).json({
         service: 'progress-service',
         version: '1.0.0',
         environment: process.env.NODE_ENV || 'development',
         kafka: {
-            isRunning: status.isRunning,
-            consumerGroupId: status.consumerGroupId
+            isRunning: true,
+            consumerGroupId: 'progress-service-group'
         },
-        topics: {
-            input: process.env.KAFKA_TOPIC_PROGRESS || 'progress-topic'
+        signalR: {
+            mode: 'serverless-rest-api',
+            tokenEndpoint: '/api/signalr/negotiate'
         },
         statistics: {
-            activeProgressStates: status.progressStates
+            activeProgressStates: progressStates.size
         }
     });
 });
 
 // Statistics endpoint
 app.get('/statistics', (req, res) => {
-    const status = getServiceStatus();
     res.status(200).json({
         service: 'progress-service',
         timestamp: new Date().toISOString(),
         statistics: {
-            activeProgressStates: status.progressStates,
+            activeProgressStates: progressStates.size,
             progressStates: Array.from(progressStates.entries()).map(([key, state]) => ({
                 key,
                 jobId: state.jobId,
@@ -159,11 +260,62 @@ app.get('/statistics', (req, res) => {
     });
 });
 
-// Graceful shutdown handling
+/**
+ * TEST ENDPOINT: Send progress update to specific orgId
+ * POST /test/send-progress
+ * Body: { jobId, orgId, serviceName, processedCount, totalRows }
+ */
+app.post('/test/send-progress', async (req, res) => {
+    try {
+        const orgId = req.body.orgId;
+        if (!orgId) {
+            return res.status(400).json({
+                error: 'orgId is required'
+            });
+        }
+        
+        const testUpdate = {
+            jobId: req.body.jobId || 'test-123',
+            orgId: orgId,
+            serviceName: req.body.serviceName || 'validation',
+            processedCount: req.body.processedCount || 100,
+            totalRows: req.body.totalRows || 1000,
+            percentage: Math.floor((req.body.processedCount / req.body.totalRows) * 100),
+            isComplete: req.body.isComplete || false,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Send to specific orgId group
+        const result = await signalRClient.sendToGroup(
+            `org_${orgId}`,  // Group name based on orgId
+            'ReceiveProgressUpdate',
+            testUpdate
+        );
+        
+        if (result.success) {
+            res.status(200).json({
+                message: 'Test progress update sent successfully',
+                update: testUpdate,
+                targetGroup: `org_${orgId}`
+            });
+        } else {
+            res.status(500).json({
+                message: 'Failed to send test progress update',
+                error: result.error
+            });
+        }
+    } catch (error) {
+        res.status(500).json({
+            message: 'Error sending test progress update',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('Received SIGINT, shutting down gracefully...');
     await stopEventHubConsumer();
-    await disconnectFromSignalR(signalRConnection);
     await closeDatabasePool(databasePool);
     process.exit(0);
 });
@@ -171,46 +323,23 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
     console.log('Received SIGTERM, shutting down gracefully...');
     await stopEventHubConsumer();
-    await disconnectFromSignalR(signalRConnection);
     await closeDatabasePool(databasePool);
     process.exit(0);
-});
-
-// Error handling
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    process.exit(1);
 });
 
 // Start the application
 const main = async (): Promise<void> => {
     try {
-        console.log('Starting Progress Service Container App...');
-        console.log('Environment variables:', {
-            KAFKA_BOOTSTRAP_SERVERS: process.env.KAFKA_BOOTSTRAP_SERVERS,
-            KAFKA_TOPIC_PROGRESS: process.env.KAFKA_TOPIC_PROGRESS,
-            DATABASE_HOST: process.env.POSTGRES_HOST,
-            SIGNALR_CONNECTION_STRING: process.env.SIGNALR_CONNECTION_STRING,
-            NODE_ENV: process.env.NODE_ENV
-        });
+        console.log('Starting Progress Service with embedded token endpoint...');
         
-        // Initialize services
         await initializeProgressService();
-        
-        // Start EventHub consumer
         await startEventHubConsumer();
         
-        // Start HTTP server
         app.listen(port, () => {
             console.log(`Progress Service running on port ${port}`);
-            console.log(`Health check available at: http://localhost:${port}/health`);
-            console.log(`Status available at: http://localhost:${port}/status`);
-            console.log(`Statistics available at: http://localhost:${port}/statistics`);
+            console.log(`Token endpoint: GET http://localhost:${port}/api/signalr/negotiate?orgId=<org>&userId=<user>`);
+            console.log(`Test endpoint: POST http://localhost:${port}/test/send-progress`);
+            console.log(`Health check: http://localhost:${port}/health`);
         });
     } catch (error) {
         console.error('Failed to start Progress Service:', error);
@@ -218,5 +347,4 @@ const main = async (): Promise<void> => {
     }
 };
 
-// Start the application
 main();

@@ -1,10 +1,12 @@
 import { calculateProgress, updateProgressState, createProgressNotification, calculateOverallProgress, shouldUpdateProgress } from '../utils/progressCalculator';
-import { sendProgressNotification, sendJobCompletionNotification } from '../utils/signalRService';
 import { logInfo, logError } from '../utils/logger';
+import { SignalRRestClient } from '../utils/signalRRestClient';
 
 /**
  * Process progress update
  * Pure function that processes a progress update
+ * 
+ * CRITICAL: Sends notifications only to the specific orgId group
  */
 export const processProgressUpdate = async (
     jobId: string,
@@ -12,14 +14,16 @@ export const processProgressUpdate = async (
     processedCount: number,
     totalRows: number,
     progressStates: Map<string, any>,
-    signalRConnection: any
+    signalRClient: SignalRRestClient,
+    orgId?: string  // NEW: Required for org-specific filtering
 ): Promise<{ success: boolean; error?: string; notification?: any }> => {
     try {
         logInfo('Processing progress update', {
             jobId,
             serviceName,
             processedCount,
-            totalRows
+            totalRows,
+            orgId
         });
         
         const stateKey = `${jobId}_${serviceName}`;
@@ -39,9 +43,10 @@ export const processProgressUpdate = async (
         // Calculate progress
         const progressResult = calculateProgress(jobId, serviceName, processedCount, totalRows, existingState);
         
-        // Update progress state
+        // Update progress state (store orgId for later use)
         const updatedState = updateProgressState(existingState, jobId, serviceName, processedCount, totalRows);
         updatedState.lastPercentage = progressResult.percentage;
+        updatedState.orgId = orgId; // Store orgId in state
         progressStates.set(stateKey, updatedState);
         
         // Create notification if needed
@@ -55,22 +60,54 @@ export const processProgressUpdate = async (
                 progressResult.isComplete
             );
             
-            // Send notification via SignalR
-            const sendResult = await sendProgressNotification(signalRConnection, notification);
+            // Add orgId to notification
+            notification.orgId = orgId;
+            
+            // CRITICAL: Send to org-specific group, not to all clients
+            let sendResult;
+            if (orgId) {
+                const groupName = `org_${orgId}`;
+                logInfo('Sending progress to org-specific group', {
+                    jobId,
+                    serviceName,
+                    groupName,
+                    percentage: progressResult.percentage
+                });
+                
+                sendResult = await signalRClient.sendToGroup(
+                    groupName,
+                    'ReceiveProgressUpdate',
+                    notification
+                );
+            } else {
+                // Fallback: send to all (not recommended for production)
+                logInfo('WARNING: No orgId provided, sending to all clients', {
+                    jobId,
+                    serviceName
+                });
+                
+                sendResult = await signalRClient.sendToAll(
+                    'ReceiveProgressUpdate',
+                    notification
+                );
+            }
+            
             if (!sendResult.success) {
                 logError('Failed to send progress notification', undefined, {
                     jobId,
                     serviceName,
+                    orgId,
                     error: sendResult.error
                 });
+            } else {
+                logInfo('Progress notification sent successfully', {
+                    jobId,
+                    serviceName,
+                    orgId,
+                    percentage: progressResult.percentage,
+                    isComplete: progressResult.isComplete
+                });
             }
-            
-            logInfo('Progress notification sent', {
-                jobId,
-                serviceName,
-                percentage: progressResult.percentage,
-                isComplete: progressResult.isComplete
-            });
             
             return {
                 success: true,
@@ -84,7 +121,8 @@ export const processProgressUpdate = async (
             jobId,
             serviceName,
             processedCount,
-            totalRows
+            totalRows,
+            orgId
         });
         return {
             success: false,
@@ -96,12 +134,15 @@ export const processProgressUpdate = async (
 /**
  * Check job completion
  * Pure function that checks if a job is complete
+ * 
+ * CRITICAL: Sends completion notification only to the specific orgId group
  */
 export const checkJobCompletion = async (
     jobId: string,
     progressStates: Map<string, any>,
-    signalRConnection: any,
-    totalRows: number
+    signalRClient: SignalRRestClient,
+    totalRows: number,
+    orgId?: string  // NEW: Required for org-specific filtering
 ): Promise<{ success: boolean; isComplete: boolean; error?: string }> => {
     try {
         const jobStates = Array.from(progressStates.entries())
@@ -116,26 +157,58 @@ export const checkJobCompletion = async (
         const isComplete = overallProgress.isComplete;
         
         if (isComplete) {
-            // Send job completion notification
-            const completionResult = await sendJobCompletionNotification(
-                signalRConnection,
+            const completionNotification = {
                 jobId,
-                overallProgress.overallPercentage,
-                totalRows
-            );
+                serviceName: 'overall',
+                percentage: overallProgress.overallPercentage,
+                processedCount: totalRows,
+                totalRows,
+                isComplete: true,
+                timestamp: new Date(),
+                orgId: orgId  // Include orgId in completion notification
+            };
+            
+            // CRITICAL: Send to org-specific group
+            let completionResult;
+            if (orgId) {
+                const groupName = `org_${orgId}`;
+                logInfo('Sending job completion to org-specific group', {
+                    jobId,
+                    groupName,
+                    overallPercentage: overallProgress.overallPercentage
+                });
+                
+                completionResult = await signalRClient.sendToGroup(
+                    groupName,
+                    'ReceiveProgressUpdate',
+                    completionNotification
+                );
+            } else {
+                // Fallback: send to all (not recommended)
+                logInfo('WARNING: No orgId provided for completion, sending to all clients', {
+                    jobId
+                });
+                
+                completionResult = await signalRClient.sendToAll(
+                    'ReceiveProgressUpdate',
+                    completionNotification
+                );
+            }
             
             if (!completionResult.success) {
                 logError('Failed to send job completion notification', undefined, {
                     jobId,
+                    orgId,
                     error: completionResult.error
                 });
+            } else {
+                logInfo('Job completion notification sent successfully', {
+                    jobId,
+                    orgId,
+                    overallPercentage: overallProgress.overallPercentage,
+                    totalRows
+                });
             }
-            
-            logInfo('Job completed', {
-                jobId,
-                overallPercentage: overallProgress.overallPercentage,
-                totalRows
-            });
         }
         
         return {
@@ -144,7 +217,8 @@ export const checkJobCompletion = async (
         };
     } catch (error) {
         logError('Job completion check failed', error, {
-            jobId
+            jobId,
+            orgId
         });
         return {
             success: false,

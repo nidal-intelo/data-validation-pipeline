@@ -135,7 +135,7 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
     const client = await pool.connect();
     try {
         const query = `
-      SELECT id, orgid, label, schema, createddate, updateddate
+      SELECT id, orgid, label, schema, uniquecols, createddate, updateddate
       FROM schemadef 
       WHERE orgid = $1 AND id = $2
       ORDER BY updateddate DESC
@@ -158,6 +158,7 @@ export const getSchemaDefinition = async (pool: Pool, orgId: string, sourceId: s
             orgId: row.orgid,
             label: row.label,
             schema: row.schema,
+            uniquecols: row.uniquecols,
             createdDate: row.createddate,
             updatedDate: row.updateddate
         };

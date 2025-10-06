@@ -36,7 +36,8 @@ message ValidRowMessage {
     string jobId = 1;
     string orgId = 2;
     string sourceId = 3;
-    DataRow validRow = 4;
+    DataRow data = 4;
+    string dataId = 5;           
 }
 
 message InvalidRowMessage {

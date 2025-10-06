@@ -8,6 +8,7 @@ import {
   sendProgressMessage,
 } from "../utils/eventHubs";
 import { logInfo, logError } from "../utils/logger";
+import { generateDataIdWithFallback, extractUniqueColumns, validateUniqueColumns } from "../utils/dataIdGenerator";
 
 /**
  * Process data chunk for validation
@@ -40,6 +41,25 @@ export const processDataChunk = async (
   const invalidRowBatch: any[] = [];
 
   try {
+    // Extract and validate unique columns from schema
+    const uniqueCols = extractUniqueColumns(schema);
+    const uniqueColsValidation = validateUniqueColumns(schema, uniqueCols);
+    
+    if (!uniqueColsValidation.isValid && uniqueCols.length > 0) {
+      logError('Some unique columns missing from schema', undefined, {
+        jobId: chunk.jobId,
+        missingColumns: uniqueColsValidation.missingColumns,
+        uniqueCols
+      });
+    }
+
+    logInfo('Starting chunk processing with unique columns', {
+      jobId: chunk.jobId,
+      chunkNumber: chunk.chunkNumber,
+      uniqueCols,
+      rowCount: chunk.rows.length
+    });
+
     // Convert JSON schema to Zod schema once for the entire chunk
     let zodSchema: any;
     try {
@@ -49,7 +69,6 @@ export const processDataChunk = async (
         jobId: chunk.jobId,
         chunkNumber: chunk.chunkNumber,
       });
-      // Prepare necessary return values for failed schema conversion
       return {
         success: false,
         processedRows: 0,
@@ -71,12 +90,21 @@ export const processDataChunk = async (
       const validationResult = validateRowWithZodSchema(row.fields, zodSchema);
 
       if (validationResult.success) {
-        // Send valid row message
+        // Generate dataId for valid row
+        const dataId = generateDataIdWithFallback(
+          row.fields,
+          schema,
+          chunk.jobId,
+          row.rowNumber
+        );
+
+        // Send valid row message with dataId
         validRowBatch.push({
           jobId: chunk.jobId,
           orgId: chunk.orgId,
           sourceId: chunk.sourceId,
-          validRow: row,
+          data: row,        // Renamed from validRow
+          dataId: dataId    // NEW: Composite key from unique columns
         });
         validRows++;
 
@@ -88,13 +116,12 @@ export const processDataChunk = async (
 
           if (!sendResult.success) {
             errors.push(
-              `Failed to send valid row ${row.rowNumber}: ${sendResult.error}`
+              `Failed to send valid row batch: ${sendResult.error}`
             );
           } 
           validRowBatch.length = 0;
         }
       } else {
-
         logInfo('Validation failed for row', {
             jobId: chunk.jobId,
             rowNumber: row.rowNumber,
@@ -111,19 +138,18 @@ export const processDataChunk = async (
         });
         invalidRows++;
 
-        
         if (invalidRowBatch.length >= BATCH_SIZE) {
             const sendResult = await sendInvalidRowMessage(invalidRowsProducer, invalidRowBatch);
             if (!sendResult.success) {
                 errors.push(`Failed to send invalid row batch: ${sendResult.error}`);
             }
-            invalidRowBatch.length = 0;  // Clear batch
+            invalidRowBatch.length = 0;
         }
-
       }
       processedRows++;
     }
 
+    // Send remaining batches
     if (validRowBatch.length > 0) {
         const sendResult = await sendValidRowMessage(validRowsProducer, validRowBatch);
         if (!sendResult.success) {
@@ -154,10 +180,11 @@ export const processDataChunk = async (
     let totalInvalidRows = 0;
 
     if (tracker) {
-    const shouldSendProgress = tracker.processedChunks % 5 === 0 || tracker.isComplete;
+      const shouldSendProgress = tracker.processedChunks % 5 === 0 || tracker.isComplete;
+      
       // Send progress update message to progress service
       if (shouldSendProgress) {
-        await sendProgressMessage(progressProducer, chunk.jobId, chunk.orgId, chunk.sourceId, {
+        await sendProgressMessage(progressProducer, chunk.jobId, chunk.orgId, chunk.sourceId, 'validation',{
             processedRows: tracker.processedRows,
             validRows: tracker.validRows,
             invalidRows: tracker.invalidRows,
@@ -166,7 +193,7 @@ export const processDataChunk = async (
             totalChunks: tracker.totalChunks,
             isComplete: tracker.isComplete
         });
-    }
+      }
 
       // Set return values based on the final tracker state
       isJobComplete = tracker.isComplete;
@@ -198,7 +225,6 @@ export const processDataChunk = async (
       jobId: chunk.jobId,
       chunkNumber: chunk.chunkNumber,
     });
-    // Prepare necessary return values for generic processing failure
     return {
       success: false,
       processedRows,
@@ -237,7 +263,6 @@ const updateProgressTracker = (
       receivedChunks: new Set([...existing.receivedChunks, chunk.chunkNumber])
     };
 
-
     if (existing.totalChunks > 0) {
         updated.isComplete = updated.processedChunks >= existing.totalChunks;
     }
@@ -249,8 +274,6 @@ const updateProgressTracker = (
 
     progressTracker.set(chunk.jobId, updated);
   } else {
-    // Initialize new tracker. Note: totalRows/totalChunks must be populated by the file processor
-    // or fetched from DB to accurately determine completion (isComplete).
     const newTracker = {
       processedRows,
       validRows,

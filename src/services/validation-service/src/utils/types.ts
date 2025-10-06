@@ -57,7 +57,8 @@ export interface ValidRowMessage {
     jobId: string;
     orgId: string;
     sourceId: string;
-    validRow: DataRow;
+    data: DataRow;
+    dataId: string;       
 }
 
 export interface InvalidRowMessage {

@@ -1,6 +1,7 @@
 import { EventHubProducerClient } from '@azure/event-hubs';
 import { getEnvironmentConfig } from './environment';
 import { logInfo, logError } from './logger';
+import { serializeValidRowMessages } from './protobufService';
 
 /**
  * Create EventHub producer client for valid rows
@@ -10,16 +11,6 @@ export const createValidRowsProducer = (): EventHubProducerClient => {
     const env = getEnvironmentConfig();
     return new EventHubProducerClient(env.kafkaBootstrapServers, env.kafkaTopicValidRows);
 };
-
-/**
- * Create EventHub producer client for invalid rows
- * Pure function that creates an invalid rows producer
- */
-export const createInvalidRowsProducer = (): EventHubProducerClient => {
-    const env = getEnvironmentConfig();
-    return new EventHubProducerClient(env.kafkaBootstrapServers, env.kafkaTopicInvalidRows);
-};
-
 /**
  * Create EventHub producer client for progress updates
  * Pure function that creates a progress producer
@@ -37,10 +28,23 @@ export const sendValidRowMessage = async (producer: EventHubProducerClient, mess
     if (messages.length === 0) return { success: true };
 
     try {
+        // Serialize messages with protobuf
+        const serializationResult = serializeValidRowMessages(messages);
+        
+        if (!serializationResult.success || serializationResult.errors.length > 0) {
+            logError('Failed to serialize valid row messages', undefined, {
+                errors: serializationResult.errors
+            });
+            return {
+                success: false,
+                error: `Serialization failed: ${serializationResult.errors.join(', ')}`
+            };
+        }
+
         const batch = await producer.createBatch();
         
-        for (const message of messages) {
-            const eventData = { body: message };
+        for (const serializedMessage of serializationResult.serializedMessages) {
+            const eventData = { body: serializedMessage };
             if (!batch.tryAdd(eventData)) {
                 // If batch is full, send it and create new one
                 if (batch.count > 0) {
@@ -58,7 +62,7 @@ export const sendValidRowMessage = async (producer: EventHubProducerClient, mess
             await producer.sendBatch(batch);
         }
 
-        logInfo('Sent valid row batch', {
+        logInfo('Sent valid row batch (protobuf serialized)', {
             count: messages.length,
             jobId: messages[0]?.jobId
         });
@@ -69,40 +73,6 @@ export const sendValidRowMessage = async (producer: EventHubProducerClient, mess
         return {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error'
-        };
-    }
-};
-
-/**
- * Send invalid row message
- * Pure function that sends an invalid row message
- */
-export const sendInvalidRowMessage = async (producer: EventHubProducerClient, messages: any[]): Promise<{ success: boolean; error?: string }> => {
-    if (messages.length === 0) return { success: true };
-
-    try {
-        const batch = await producer.createBatch();
-
-        for (const message of messages) {
-            const eventData = { body: message };
-            if (!batch.tryAdd(eventData)) {
-                // If batch is full, send it and create new one
-                if (batch.count > 0) {
-                    await producer.sendBatch(batch);
-                }
-                const newBatch = await producer.createBatch();
-                if (!newBatch.tryAdd(eventData)) {
-                    throw new Error('Single event too large for batch');
-                }
-                await producer.sendBatch(newBatch);
-            }
-        }
-        return { success: true };
-    } catch (error) {
-        logError('Failed to send invalid row batch', error);
-        return {
-            success: false,
-            error: error instanceof Error ? error.message : 'Unknown error occurred'
         };
     }
 };

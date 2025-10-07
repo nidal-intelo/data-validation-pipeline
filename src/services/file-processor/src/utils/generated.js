@@ -1242,6 +1242,7 @@ $root.cfk_poc = (function() {
              * @property {string|null} [sourceId] ValidRowMessage sourceId
              * @property {cfk_poc.pipeline.IDataRow|null} [data] ValidRowMessage data
              * @property {string|null} [dataId] ValidRowMessage dataId
+             * @property {number|Long|null} [timestamp] ValidRowMessage timestamp
              */
 
             /**
@@ -1300,6 +1301,14 @@ $root.cfk_poc = (function() {
             ValidRowMessage.prototype.dataId = "";
 
             /**
+             * ValidRowMessage timestamp.
+             * @member {number|Long} timestamp
+             * @memberof cfk_poc.pipeline.ValidRowMessage
+             * @instance
+             */
+            ValidRowMessage.prototype.timestamp = $util.Long ? $util.Long.fromBits(0,0,false) : 0;
+
+            /**
              * Creates a new ValidRowMessage instance using the specified properties.
              * @function create
              * @memberof cfk_poc.pipeline.ValidRowMessage
@@ -1333,6 +1342,8 @@ $root.cfk_poc = (function() {
                     $root.cfk_poc.pipeline.DataRow.encode(message.data, writer.uint32(/* id 4, wireType 2 =*/34).fork()).ldelim();
                 if (message.dataId != null && Object.hasOwnProperty.call(message, "dataId"))
                     writer.uint32(/* id 5, wireType 2 =*/42).string(message.dataId);
+                if (message.timestamp != null && Object.hasOwnProperty.call(message, "timestamp"))
+                    writer.uint32(/* id 6, wireType 0 =*/48).int64(message.timestamp);
                 return writer;
             };
 
@@ -1389,6 +1400,10 @@ $root.cfk_poc = (function() {
                             message.dataId = reader.string();
                             break;
                         }
+                    case 6: {
+                            message.timestamp = reader.int64();
+                            break;
+                        }
                     default:
                         reader.skipType(tag & 7);
                         break;
@@ -1441,6 +1456,9 @@ $root.cfk_poc = (function() {
                 if (message.dataId != null && message.hasOwnProperty("dataId"))
                     if (!$util.isString(message.dataId))
                         return "dataId: string expected";
+                if (message.timestamp != null && message.hasOwnProperty("timestamp"))
+                    if (!$util.isInteger(message.timestamp) && !(message.timestamp && $util.isInteger(message.timestamp.low) && $util.isInteger(message.timestamp.high)))
+                        return "timestamp: integer|Long expected";
                 return null;
             };
 
@@ -1469,6 +1487,15 @@ $root.cfk_poc = (function() {
                 }
                 if (object.dataId != null)
                     message.dataId = String(object.dataId);
+                if (object.timestamp != null)
+                    if ($util.Long)
+                        (message.timestamp = $util.Long.fromValue(object.timestamp)).unsigned = false;
+                    else if (typeof object.timestamp === "string")
+                        message.timestamp = parseInt(object.timestamp, 10);
+                    else if (typeof object.timestamp === "number")
+                        message.timestamp = object.timestamp;
+                    else if (typeof object.timestamp === "object")
+                        message.timestamp = new $util.LongBits(object.timestamp.low >>> 0, object.timestamp.high >>> 0).toNumber();
                 return message;
             };
 
@@ -1491,6 +1518,11 @@ $root.cfk_poc = (function() {
                     object.sourceId = "";
                     object.data = null;
                     object.dataId = "";
+                    if ($util.Long) {
+                        var long = new $util.Long(0, 0, false);
+                        object.timestamp = options.longs === String ? long.toString() : options.longs === Number ? long.toNumber() : long;
+                    } else
+                        object.timestamp = options.longs === String ? "0" : 0;
                 }
                 if (message.jobId != null && message.hasOwnProperty("jobId"))
                     object.jobId = message.jobId;
@@ -1502,6 +1534,11 @@ $root.cfk_poc = (function() {
                     object.data = $root.cfk_poc.pipeline.DataRow.toObject(message.data, options);
                 if (message.dataId != null && message.hasOwnProperty("dataId"))
                     object.dataId = message.dataId;
+                if (message.timestamp != null && message.hasOwnProperty("timestamp"))
+                    if (typeof message.timestamp === "number")
+                        object.timestamp = options.longs === String ? String(message.timestamp) : message.timestamp;
+                    else
+                        object.timestamp = options.longs === String ? $util.Long.prototype.toString.call(message.timestamp) : options.longs === Number ? new $util.LongBits(message.timestamp.low >>> 0, message.timestamp.high >>> 0).toNumber() : message.timestamp;
                 return object;
             };
 

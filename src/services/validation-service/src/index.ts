@@ -30,7 +30,6 @@ const progressTracker = new Map();
 // Service instances
 let consumer: EventHubConsumerClient;
 let validRowsProducer: any;
-let invalidRowsProducer: any;
 let progressProducer: any;
 let databasePool: any;
 
@@ -46,7 +45,6 @@ const initializeValidationService = async (): Promise<void> => {
 
     // Initialize EventHub producers
     validRowsProducer = require("./utils/eventHubs").createValidRowsProducer();
-    invalidRowsProducer = require("./utils/eventHubs").createInvalidRowsProducer();
     progressProducer = require("./utils/eventHubs").createProgressProducer();
 
     // Initialize checkpoint store
@@ -125,7 +123,6 @@ const startEventHubConsumer = async (): Promise<void> => {
                 event,
                 databasePool,
                 validRowsProducer,
-                invalidRowsProducer,
                 progressProducer,
                 progressTracker
               );
@@ -260,7 +257,6 @@ process.on("SIGINT", async () => {
   console.log("Received SIGINT, shutting down gracefully...");
   await stopEventHubConsumer();
   await closeEventHubProducer(validRowsProducer);
-  await closeEventHubProducer(invalidRowsProducer);
   await closeEventHubProducer(progressProducer);
   await closeDatabasePool(databasePool);
   process.exit(0);
@@ -270,7 +266,6 @@ process.on("SIGTERM", async () => {
   console.log("Received SIGTERM, shutting down gracefully...");
   await stopEventHubConsumer();
   await closeEventHubProducer(validRowsProducer);
-  await closeEventHubProducer(invalidRowsProducer);
   await closeEventHubProducer(progressProducer);
   await closeDatabasePool(databasePool);
   process.exit(0);

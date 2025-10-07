@@ -1,6 +1,6 @@
 import { calculateProgress, updateProgressState, createProgressNotification, calculateOverallProgress, shouldUpdateProgress } from '../utils/progressCalculator';
 import { logInfo, logError } from '../utils/logger';
-import { SignalRRestClient } from '../utils/signalRRestClient';
+import { sendProgressUpdate } from '../utils/firebaseClient';
 
 /**
  * Process progress update

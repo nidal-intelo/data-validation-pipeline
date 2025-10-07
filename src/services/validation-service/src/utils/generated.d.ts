@@ -495,6 +495,9 @@ export namespace cfk_poc {
 
             /** ValidRowMessage dataId */
             dataId?: (string|null);
+
+            /** ValidRowMessage timestamp */
+            timestamp?: (number|Long|null);
         }
 
         /** Represents a ValidRowMessage. */
@@ -520,6 +523,9 @@ export namespace cfk_poc {
 
             /** ValidRowMessage dataId. */
             public dataId: string;
+
+            /** ValidRowMessage timestamp. */
+            public timestamp: (number|Long);
 
             /**
              * Creates a new ValidRowMessage instance using the specified properties.

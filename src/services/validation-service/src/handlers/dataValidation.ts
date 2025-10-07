@@ -3,6 +3,7 @@ import { processDataChunk } from '../services/validationService';
 import { logInfo, logError } from '../utils/logger';
 import * as generated from '../utils/generated.js';
 import { clearProgressTracker } from '../services/validationService';
+import { createInvalidRowWriter } from '../utils/blobWriter';
 
 /**
  * Handle data validation event
@@ -12,7 +13,6 @@ export const handleDataValidation = async (
     eventData: any,
     databasePool: any,
     validRowsProducer: any,
-    invalidRowsProducer: any,
     progressProducer: any,
     progressTracker: Map<string, any>
 ): Promise<void> => {
@@ -26,6 +26,9 @@ export const handleDataValidation = async (
                 totalRows: metadata.totalRows
             });
 
+            const writer = createInvalidRowWriter(metadata.orgId, metadata.sourceId, metadata.jobId);
+
+
             // Initialize or update progress tracker with totals
             const existing = progressTracker.get(metadata.jobId);
             if (existing) {
@@ -34,7 +37,8 @@ export const handleDataValidation = async (
                     totalChunks: metadata.totalChunks,
                     totalRows: metadata.totalRows,
                     schema: metadata.schema,  // ← Update schema if metadata comes late
-                    expectedChunks: metadata.totalChunks
+                    expectedChunks: metadata.totalChunks,
+                    invalidRowWriter: writer
                 });
             } else {
                 progressTracker.set(metadata.jobId, {
@@ -47,7 +51,8 @@ export const handleDataValidation = async (
                     schema: metadata.schema,  // ← Store schema from metadata
                     isComplete: false,
                     receivedChunks: new Set(),
-                    expectedChunks: metadata.totalChunks
+                    expectedChunks: metadata.totalChunks,
+                    invalidRowWriter: writer
                 });
             }
 
@@ -136,7 +141,6 @@ export const handleDataValidation = async (
             chunk, 
             currentTracker.schema, 
             validRowsProducer, 
-            invalidRowsProducer, 
             progressProducer, 
             progressTracker
         );
@@ -158,7 +162,6 @@ export const handleDataValidation = async (
             invalidRows: result.invalidRows
         });
 
-        // ===== NEW: Atomic database update =====
         const tracker = progressTracker.get(chunk.jobId);
         if (!tracker) {
             logError('Progress tracker disappeared during processing', undefined, { 
@@ -219,6 +222,25 @@ export const handleDataValidation = async (
                     totalChunks: tracker.totalChunks
                 });
                 
+                if (tracker.invalidRowWriter) {
+                    const blobResult = await tracker.invalidRowWriter.finalize();
+                    if (blobResult.success && blobResult.blobPath) {
+                        logInfo('Invalid rows file created', {
+                            jobId: chunk.jobId,
+                            blobPath: blobResult.blobPath,
+                            totalInvalidRows: dbResult.invalidRows
+                        });
+                    }
+                    await updateValidationStatus(
+                        databasePool, 
+                        chunk.jobId, 
+                        dbResult.validRows, 
+                        dbResult.invalidRows, 
+                        'completed',
+                        blobResult.blobPath  // Add this parameter
+                    );
+                }
+
                 // Remove job from in-memory tracker
                 clearProgressTracker(progressTracker, chunk.jobId);
             }

@@ -110,8 +110,6 @@ app.get('/api/signalr/negotiate', (req, res) => {
         const env = getEnvironmentConfig();
         const { endpoint, accessKey } = parseConnectionString(env.signalRConnectionString);
         
-        // CRITICAL: Get orgId from query params for org-specific filtering
-        const userId = req.query.userId as string || undefined;
         const orgId = req.query.orgId as string;
         const hubName = req.query.hubName as string || 'progressHub';
         
@@ -121,22 +119,22 @@ app.get('/api/signalr/negotiate', (req, res) => {
             });
         }
         
-        // Generate token with orgId claim
-        const accessToken = generateSignalRToken(endpoint, accessKey, hubName, userId, orgId, 60);
+        // CRITICAL: Generate token with group membership
+        const groupName = `org_${orgId}`;
+        const token = generateSignalRTokenWithGroup(endpoint, accessKey, hubName, groupName, 60);
         
-        // Build connection URL
         const url = `${endpoint}/client/?hub=${hubName}`;
         
-        logInfo('Generated SignalR connection info', {
-            userId,
+        logInfo('Generated SignalR connection info with group', {
             orgId,
-            hubName
+            hubName,
+            groupName
         });
         
         res.status(200).json({
             url: url,
-            accessToken: accessToken,
-            orgId: orgId // Return orgId for client reference
+            accessToken: token,
+            orgId: orgId
         });
     } catch (error) {
         logError('Failed to generate SignalR token', error);
@@ -145,6 +143,42 @@ app.get('/api/signalr/negotiate', (req, res) => {
         });
     }
 });
+
+
+function generateSignalRTokenWithGroup(
+    endpoint: string,
+    accessKey: string,
+    hubName: string,
+    groupName: string,
+    expiresInMinutes: number = 60
+): string {
+    const cleanEndpoint = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+    const audience = `${cleanEndpoint}/client/?hub=${hubName}`;
+    const expiresAt = Math.floor(Date.now() / 1000) + (expiresInMinutes * 60);
+    
+    const header = {
+        alg: 'HS256',
+        typ: 'JWT'
+    };
+    
+    const payload = {
+        aud: audience,
+        exp: expiresAt,
+        iat: Math.floor(Date.now() / 1000),
+        role: [`webpubsub.group.${groupName}`]  // ← Add group membership
+    };
+    
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    
+    const signature = crypto
+        .createHmac('sha256', accessKey)
+        .update(`${encodedHeader}.${encodedPayload}`)
+        .digest('base64url');
+    
+    return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
 
 /**
  * Initialize progress service

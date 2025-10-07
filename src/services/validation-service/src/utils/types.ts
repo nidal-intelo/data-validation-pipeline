@@ -58,15 +58,8 @@ export interface ValidRowMessage {
     orgId: string;
     sourceId: string;
     data: DataRow;
-    dataId: string;       
-}
-
-export interface InvalidRowMessage {
-    jobId: string;
-    orgId: string;
-    sourceId: string;
-    originalRow: DataRow;
-    errors: ValidationError[];
+    dataId: string;
+    timestamp: number;
 }
 
 export interface ProgressTracker {

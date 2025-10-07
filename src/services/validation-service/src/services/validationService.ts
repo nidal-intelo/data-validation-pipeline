@@ -4,7 +4,6 @@ import {
 } from "../utils/schemaConverter";
 import {
   sendValidRowMessage,
-  sendInvalidRowMessage,
   sendProgressMessage,
 } from "../utils/eventHubs";
 import { logInfo, logError } from "../utils/logger";
@@ -18,7 +17,6 @@ export const processDataChunk = async (
   chunk: any,
   schema: any,
   validRowsProducer: any,
-  invalidRowsProducer: any,
   progressProducer: any,
   progressTracker: Map<string, any>
 ): Promise<{
@@ -98,13 +96,14 @@ export const processDataChunk = async (
           row.rowNumber
         );
 
-        // Send valid row message with dataId
+        // Send valid row message with dataId and timestamp
         validRowBatch.push({
           jobId: chunk.jobId,
           orgId: chunk.orgId,
           sourceId: chunk.sourceId,
           data: row,        // Renamed from validRow
-          dataId: dataId    // NEW: Composite key from unique columns
+          dataId: dataId,    // NEW: Composite key from unique columns
+          timestamp: Date.now()  // NEW: Current timestamp in milliseconds
         });
         validRows++;
 
@@ -127,25 +126,49 @@ export const processDataChunk = async (
             rowNumber: row.rowNumber,
             validationErrors: validationResult.errors
         });
-
-        // Send invalid row message
+    
+        // Transform Zod errors to consistent array format
+        let formattedErrors = [];
+        
+        if (validationResult.errors && typeof validationResult.errors === 'object') {
+            // Check if it has the Zod issues array structure
+            if (Array.isArray(validationResult.errors.issues)) {
+                formattedErrors = validationResult.errors.issues.map((issue: any) => ({
+                    field: Array.isArray(issue.path) ? issue.path.join('.') : String(issue.path || 'Unknown'),
+                    code: issue.code || 'validation_error',
+                    message: issue.message || 'Validation failed',
+                    expected: issue.expected,
+                    received: issue.received
+                }));
+            } else {
+                // Fallback for unexpected error structure
+                formattedErrors = [{
+                    field: 'Unknown',
+                    code: 'validation_error',
+                    message: JSON.stringify(validationResult.errors),
+                    expected: 'valid data',
+                    received: 'invalid data'
+                }];
+            }
+        }
+    
         invalidRowBatch.push({
             jobId: chunk.jobId,
             orgId: chunk.orgId,
             sourceId: chunk.sourceId,
             originalRow: row,
-            errors: validationResult.errors
+            errors: formattedErrors  // Always an array
         });
         invalidRows++;
-
+    
         if (invalidRowBatch.length >= BATCH_SIZE) {
-            const sendResult = await sendInvalidRowMessage(invalidRowsProducer, invalidRowBatch);
-            if (!sendResult.success) {
-                errors.push(`Failed to send invalid row batch: ${sendResult.error}`);
+            const tracker = progressTracker.get(chunk.jobId);
+            if (tracker?.invalidRowWriter) {
+                await tracker.invalidRowWriter.append(invalidRowBatch);
             }
             invalidRowBatch.length = 0;
         }
-      }
+    }
       processedRows++;
     }
 
@@ -158,9 +181,9 @@ export const processDataChunk = async (
     }
 
     if (invalidRowBatch.length > 0) {
-        const sendResult = await sendInvalidRowMessage(invalidRowsProducer, invalidRowBatch);
-        if (!sendResult.success) {
-            errors.push(`Failed to send final invalid row batch: ${sendResult.error}`);
+        const tracker = progressTracker.get(chunk.jobId);
+        if (tracker?.invalidRowWriter) {
+            await tracker.invalidRowWriter.append(invalidRowBatch);
         }
     }
 

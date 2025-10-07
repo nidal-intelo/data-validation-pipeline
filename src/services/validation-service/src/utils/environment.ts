@@ -22,6 +22,8 @@ export const getEnvironmentConfig = (): {
     nodeEnv: string;
     azureStorageConnectionString: string;
     azureStorageContainerName: string;
+    dataStorageConnection: string;
+    dataStorageContainer: string;
 } => {
     const requiredEnvVars = [
         'KAFKA_BOOTSTRAP_SERVERS',
@@ -34,7 +36,9 @@ export const getEnvironmentConfig = (): {
         'POSTGRES_CLIENT_ID',
         'DATABRICKS_OAUTH_TOKEN',
         'AZURE_STORAGE_CONNECTION_STRING',
-        'AZURE_STORAGE_CONTAINER_NAME'
+        'AZURE_STORAGE_CONTAINER_NAME',
+        'DATA_STORAGE_CONNECTION',
+        'DATA_STORAGE_CONTAINER'
     ];
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -56,7 +60,9 @@ export const getEnvironmentConfig = (): {
         validationMaxAccumulatedRows: parseInt(process.env.VALIDATION_MAX_ACCUMULATED_ROWS || '1000', 10),
         nodeEnv: process.env.NODE_ENV || 'development',
         azureStorageConnectionString: process.env.AZURE_STORAGE_CONNECTION_STRING!,
-        azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME!
+        azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME!,
+        dataStorageConnection: process.env.DATA_STORAGE_CONNECTION!,
+        dataStorageContainer: process.env.DATA_STORAGE_CONTAINER!
     };
 };
 

@@ -322,6 +322,7 @@
                     })
                     .withAutomaticReconnect()
                     .configureLogging(signalR.LogLevel.Information)
+                    .configureLogging(signalR.LogLevel.Debug)  
                     .build();
                 
                 // Step 3: Set up message handler

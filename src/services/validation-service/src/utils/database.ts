@@ -21,7 +21,6 @@ export const createDatabaseConfig = (): any => {
     };
 };
 
-const schemaCache = new Map<string, any>();
 
 /**
  * Create database connection pool
@@ -105,16 +104,25 @@ export const updateValidationStatus = async (
     sessionId: string,
     validRows: number,
     invalidRows: number,
-    status: string
+    status: string,
+    errorFilePath?: string
 ): Promise<{ success: boolean; error?: string }> => {
     const client = await pool.connect();
     try {
-        const query = `
-      UPDATE uploadsession 
-      SET validrows = $1, invalidrows = $2, validationstatus = $3, updatedat = NOW()
-      WHERE id = $4
-    `;
-        await client.query(query, [validRows, invalidRows, status, sessionId]);
+        const query = errorFilePath 
+            ? `UPDATE uploadsession 
+               SET validrows = $1, invalidrows = $2, validationstatus = $3, 
+                   errorfilepath = $4, updatedat = NOW()
+               WHERE id = $5`
+            : `UPDATE uploadsession 
+               SET validrows = $1, invalidrows = $2, validationstatus = $3, updatedat = NOW()
+               WHERE id = $4`;
+
+               const params = errorFilePath 
+            ? [validRows, invalidRows, status, errorFilePath, sessionId]
+            : [validRows, invalidRows, status, sessionId];
+
+        await client.query(query, params);
         
         logInfo('Updated validation status', {
             sessionId,

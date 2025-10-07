@@ -23,27 +23,11 @@ message ProgressUpdate {
     int32 totalRows = 4;
 }
 
-message ValidationError {
-    string fieldName = 1;  
-    string errorCode = 2;  
-    string errorMessage = 3;  
-    string expectedFormat = 4;
-    string actualValue = 5;
-    string validationRule = 6;
-}
-
 message ValidRowMessage {
     string jobId = 1;
     string orgId = 2;
     string sourceId = 3;
     DataRow data = 4;
-    string dataId = 5;           
-}
-
-message InvalidRowMessage {
-    string jobId = 1;
-    string orgId = 2;
-    string sourceId = 3;
-    DataRow originalRow = 4;
-    repeated ValidationError errors = 5;
+    string dataId = 5;
+    int64 timestamp = 6;
 }

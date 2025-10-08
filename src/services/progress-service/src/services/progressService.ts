@@ -1,12 +1,10 @@
 import { calculateProgress, updateProgressState, createProgressNotification, calculateOverallProgress, shouldUpdateProgress } from '../utils/progressCalculator';
 import { logInfo, logError } from '../utils/logger';
-import { sendProgressUpdate } from '../utils/firebaseClient';
+import { writeProgressUpdate, writeJobCompletion } from '../utils/firebaseClient';
 
 /**
  * Process progress update
- * Pure function that processes a progress update
- * 
- * CRITICAL: Sends notifications only to the specific orgId group
+ * Sends updates directly to Firebase Firestore for the specific orgId
  */
 export const processProgressUpdate = async (
     jobId: string,
@@ -14,10 +12,24 @@ export const processProgressUpdate = async (
     processedCount: number,
     totalRows: number,
     progressStates: Map<string, any>,
-    signalRClient: SignalRRestClient,
-    orgId?: string  // NEW: Required for org-specific filtering
+    orgId: string,
+    metadata?: {
+        fileName?: string;
+        uploadedBy?: string;
+    }
 ): Promise<{ success: boolean; error?: string; notification?: any }> => {
     try {
+        if (!orgId) {
+            logError('Progress update missing orgId', undefined, {
+                jobId,
+                serviceName
+            });
+            return {
+                success: false,
+                error: 'Missing orgId - cannot write to Firestore'
+            };
+        }
+
         logInfo('Processing progress update', {
             jobId,
             serviceName,
@@ -43,14 +55,48 @@ export const processProgressUpdate = async (
         // Calculate progress
         const progressResult = calculateProgress(jobId, serviceName, processedCount, totalRows, existingState);
         
-        // Update progress state (store orgId for later use)
+        // Update progress state
         const updatedState = updateProgressState(existingState, jobId, serviceName, processedCount, totalRows);
         updatedState.lastPercentage = progressResult.percentage;
-        updatedState.orgId = orgId; // Store orgId in state
+        updatedState.orgId = orgId;
         progressStates.set(stateKey, updatedState);
         
-        // Create notification if needed
+        // Send to Firestore if progress changed significantly
         if (progressResult.shouldNotify) {
+            const firestoreResult = await writeProgressUpdate(
+                orgId,
+                jobId,
+                serviceName,
+                {
+                    percentage: progressResult.percentage,
+                    processedCount: processedCount,
+                    totalRows: totalRows,
+                    isComplete: progressResult.isComplete
+                },
+                metadata
+            );
+            
+            if (!firestoreResult.success) {
+                logError('Failed to write progress to Firestore', undefined, {
+                    jobId,
+                    serviceName,
+                    orgId,
+                    error: firestoreResult.error
+                });
+                return {
+                    success: false,
+                    error: firestoreResult.error
+                };
+            }
+            
+            logInfo('Progress written to Firestore successfully', {
+                jobId,
+                serviceName,
+                orgId,
+                percentage: progressResult.percentage,
+                isComplete: progressResult.isComplete
+            });
+            
             const notification = createProgressNotification(
                 jobId,
                 serviceName,
@@ -59,55 +105,7 @@ export const processProgressUpdate = async (
                 totalRows,
                 progressResult.isComplete
             );
-            
-            // Add orgId to notification
             notification.orgId = orgId;
-            
-            // CRITICAL: Send to org-specific group, not to all clients
-            let sendResult;
-            if (orgId) {
-                const groupName = `org_${orgId}`;
-                logInfo('Sending progress to org-specific group', {
-                    jobId,
-                    serviceName,
-                    groupName,
-                    percentage: progressResult.percentage
-                });
-                
-                sendResult = await signalRClient.sendToGroup(
-                    groupName,
-                    'ReceiveProgressUpdate',
-                    notification
-                );
-            } else {
-                // Fallback: send to all (not recommended for production)
-                logInfo('WARNING: No orgId provided, sending to all clients', {
-                    jobId,
-                    serviceName
-                });
-                
-                sendResult = await signalRClient.sendToAll(
-                    'ReceiveProgressUpdate',
-                    notification
-                );
-            }
-            
-            if (!sendResult.success) {
-                logError('Failed to send progress notification', undefined, {
-                    jobId,
-                    serviceName,
-                    orgId,
-                    error: sendResult.error
-                });
-            } else {
-                logInfo('Progress notification sent successfully', {
-                    jobId,
-                    serviceName,
-                    orgId,
-                    percentage: progressResult.percentage,
-                    isComplete: progressResult.isComplete
-                });
-            }
             
             return {
                 success: true,
@@ -133,18 +131,24 @@ export const processProgressUpdate = async (
 
 /**
  * Check job completion
- * Pure function that checks if a job is complete
- * 
- * CRITICAL: Sends completion notification only to the specific orgId group
+ * Writes completion status to Firestore for the specific orgId
  */
 export const checkJobCompletion = async (
     jobId: string,
     progressStates: Map<string, any>,
-    signalRClient: SignalRRestClient,
     totalRows: number,
-    orgId?: string  // NEW: Required for org-specific filtering
+    orgId: string
 ): Promise<{ success: boolean; isComplete: boolean; error?: string }> => {
     try {
+        if (!orgId) {
+            logError('Job completion check missing orgId', undefined, { jobId });
+            return {
+                success: false,
+                isComplete: false,
+                error: 'Missing orgId'
+            };
+        }
+
         const jobStates = Array.from(progressStates.entries())
             .filter(([key]) => key.startsWith(`${jobId}_`))
             .map(([_, state]) => state);
@@ -157,58 +161,42 @@ export const checkJobCompletion = async (
         const isComplete = overallProgress.isComplete;
         
         if (isComplete) {
-            const completionNotification = {
-                jobId,
-                serviceName: 'overall',
-                percentage: overallProgress.overallPercentage,
-                processedCount: totalRows,
-                totalRows,
-                isComplete: true,
-                timestamp: new Date(),
-                orgId: orgId  // Include orgId in completion notification
-            };
+            const completedServices = jobStates
+            .filter(state => state.lastPercentage >= 100)
+            .map(state => state.serviceName);
             
-            // CRITICAL: Send to org-specific group
-            let completionResult;
-            if (orgId) {
-                const groupName = `org_${orgId}`;
-                logInfo('Sending job completion to org-specific group', {
-                    jobId,
-                    groupName,
-                    overallPercentage: overallProgress.overallPercentage
-                });
-                
-                completionResult = await signalRClient.sendToGroup(
-                    groupName,
-                    'ReceiveProgressUpdate',
-                    completionNotification
-                );
-            } else {
-                // Fallback: send to all (not recommended)
-                logInfo('WARNING: No orgId provided for completion, sending to all clients', {
-                    jobId
-                });
-                
-                completionResult = await signalRClient.sendToAll(
-                    'ReceiveProgressUpdate',
-                    completionNotification
-                );
-            }
+            const completionResult = await writeJobCompletion(
+                orgId,
+                jobId,
+                overallProgress.overallPercentage,
+                completedServices
+            );
             
             if (!completionResult.success) {
-                logError('Failed to send job completion notification', undefined, {
+                logError('Failed to write job completion to Firestore', undefined, {
                     jobId,
                     orgId,
                     error: completionResult.error
                 });
-            } else {
-                logInfo('Job completion notification sent successfully', {
-                    jobId,
-                    orgId,
-                    overallPercentage: overallProgress.overallPercentage,
-                    totalRows
-                });
+                return {
+                    success: false,
+                    isComplete: false,
+                    error: completionResult.error
+                };
             }
+            
+            logInfo('Job completion written to Firestore successfully', {
+                jobId,
+                orgId,
+                overallPercentage: overallProgress.overallPercentage,
+                totalRows
+            });
+
+            clearJobProgress(jobId, progressStates);
+            logInfo('Cleaned up in-memory state for completed job', {
+                jobId,
+                orgId
+            });
         }
         
         return {

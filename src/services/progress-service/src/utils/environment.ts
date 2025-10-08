@@ -14,7 +14,8 @@ export const getEnvironmentConfig = (): {
     postgresDatabase: string;
     postgresClientId: string;
     postgresClientSecret: string;
-    signalRConnectionString: string;
+    firebaseServiceAccount: string;
+    firebaseProjectId: string;
     nodeEnv: string;
 } => {
     const requiredEnvVars = [
@@ -24,13 +25,20 @@ export const getEnvironmentConfig = (): {
         'POSTGRES_DATABASE',
         'POSTGRES_CLIENT_ID',
         'DATABRICKS_OAUTH_TOKEN',
-        'SIGNALR_CONNECTION_STRING'
+        'FIREBASE_SERVICE_ACCOUNT',
+        'FIREBASE_PROJECT_ID'
     ];
 
     const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
     if (missingVars.length > 0) {
         throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
     }
+
+    // Decode Firebase service account from base64
+    const firebaseServiceAccount = Buffer.from(
+        process.env.FIREBASE_SERVICE_ACCOUNT!,
+        'base64'
+    ).toString('utf-8');
 
     return {
         kafkaBootstrapServers: process.env.KAFKA_BOOTSTRAP_SERVERS!,
@@ -39,7 +47,8 @@ export const getEnvironmentConfig = (): {
         postgresDatabase: process.env.POSTGRES_DATABASE!,
         postgresClientId: process.env.POSTGRES_CLIENT_ID!,
         postgresClientSecret: process.env.DATABRICKS_OAUTH_TOKEN!,
-        signalRConnectionString: process.env.SIGNALR_CONNECTION_STRING!,
+        firebaseServiceAccount: firebaseServiceAccount,
+        firebaseProjectId: process.env.FIREBASE_PROJECT_ID!,
         nodeEnv: process.env.NODE_ENV || 'development'
     };
 };

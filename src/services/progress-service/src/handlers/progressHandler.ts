@@ -1,71 +1,72 @@
 import { processProgressUpdate, checkJobCompletion } from '../services/progressService';
 import { logInfo, logError } from '../utils/logger';
-import { SignalRRestClient } from '../utils/signalRRestClient';
 
 /**
  * Handle progress update event
- * Pure function that handles progress events
+ * Receives updates from Event Hubs and writes to Firestore
  */
 export const handleProgressUpdate = async (
     eventData: any,
-    progressStates: Map<string, any>,
-    signalRClient: SignalRRestClient
+    progressStates: Map<string, any>
 ): Promise<void> => {
     try {
         const progressUpdate = eventData.body;
         
-        logInfo('Received progress update', {
+        // Validate required fields
+        if (!progressUpdate.jobId || !progressUpdate.orgId || !progressUpdate.serviceName) {
+            logError('Progress update missing required fields', undefined, {
+                hasJobId: !!progressUpdate.jobId,
+                hasOrgId: !!progressUpdate.orgId,
+                hasServiceName: !!progressUpdate.serviceName
+            });
+            return;
+        }
+
+        logInfo('Received progress update from Event Hubs', {
             jobId: progressUpdate.jobId,
+            orgId: progressUpdate.orgId,
             serviceName: progressUpdate.serviceName,
             processedCount: progressUpdate.processedCount,
-            orgId: progressUpdate.orgId  // Log orgId for visibility
+            totalRows: progressUpdate.totalRows,
+            isComplete: progressUpdate.isComplete
         });
         
-        // CRITICAL: Extract orgId from progress update
-        const orgId = progressUpdate.orgId;
-        
-        if (!orgId) {
-            logError('Progress update missing orgId - cannot filter by organization', undefined, {
-                jobId: progressUpdate.jobId,
-                serviceName: progressUpdate.serviceName
-            });
-            // Continue processing but log warning
-        }
-        
-        // Process the progress update with orgId
+        // Process the progress update and write to Firestore
         const result = await processProgressUpdate(
             progressUpdate.jobId,
             progressUpdate.serviceName,
             progressUpdate.processedCount,
             progressUpdate.totalRows || 0,
             progressStates,
-            signalRClient,
-            orgId  // Pass orgId for org-specific filtering
+            progressUpdate.orgId,
+            {
+                fileName: progressUpdate.fileName,
+                uploadedBy: progressUpdate.uploadedBy
+            }
         );
         
         if (!result.success) {
             logError('Progress update processing failed', undefined, {
                 jobId: progressUpdate.jobId,
                 serviceName: progressUpdate.serviceName,
-                orgId,
+                orgId: progressUpdate.orgId,
                 error: result.error
             });
             return;
         }
         
-        // Check if job is complete (with orgId)
+        // Check if job is complete
         const completionResult = await checkJobCompletion(
             progressUpdate.jobId,
             progressStates,
-            signalRClient,
             progressUpdate.totalRows || 0,
-            orgId  // Pass orgId for org-specific filtering
+            progressUpdate.orgId
         );
         
         if (!completionResult.success) {
             logError('Job completion check failed', undefined, {
                 jobId: progressUpdate.jobId,
-                orgId,
+                orgId: progressUpdate.orgId,
                 error: completionResult.error
             });
         }
@@ -73,7 +74,7 @@ export const handleProgressUpdate = async (
         logInfo('Progress update handled successfully', {
             jobId: progressUpdate.jobId,
             serviceName: progressUpdate.serviceName,
-            orgId,
+            orgId: progressUpdate.orgId,
             isComplete: completionResult.isComplete
         });
     } catch (error) {
